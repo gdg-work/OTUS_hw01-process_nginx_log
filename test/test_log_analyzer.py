@@ -16,19 +16,26 @@ class TestFilesSelection(ut.TestCase):
         cls._dir = pl.Path(TEMPDIR, 'TestDir')
         cls.in_dir = cls._dir / pl.Path('log')
         cls.out_dir = cls._dir / pl.Path('report')
+        # make test directories
         for p in (cls._dir, cls.in_dir, cls.out_dir):
             p.mkdir()
-        for fake_date in range(20210320,20210330):
+        # create some files in the test directory
+        for fake_date in range(20210310,20210331):
             fake_filename = "nginx-test-acc_{}.log".format(fake_date)
             if fake_date % 3 == 0:
-                (cls.in_dir / pl.Path(fake_filename)).touch(mode=0o644)
-            else:
                 (cls.in_dir / pl.Path(fake_filename + '.gz')).touch(mode=0o644)
+            else:
+                if fake_date % 5 == 0:
+                    (cls.in_dir / pl.Path(fake_filename + '.bz2')).touch(mode=0o644)
+                else:
+                    (cls.in_dir / pl.Path(fake_filename)).touch(mode=0o644)
+
         cls.cfg = la.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
                            report_dir=str(TestFilesSelection.out_dir),
                            report_size=10, verbose=True,
                            log_glob='nginx-test-acc_*log',
-                           report_glob='rep*.html')
+                           report_glob='rep*.html',
+                           allow_exts=['gz'])
         return
 
     @classmethod
@@ -41,12 +48,12 @@ class TestFilesSelection(ut.TestCase):
 
     @ut.skip('for testing of tests')
     def test_list_logs(self):
-        print("\n".join([str(f) for f in TestFilesSelection.in_dir.glob('*')]))
+        print("\n", "\n".join([str(f) for f in TestFilesSelection.in_dir.glob('*')]))
         self.assertTrue(True)
 
     def test_find_last_log(self):
-        fn = la.selectInputFiles(TestFilesSelection.cfg, logging)
-        self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_20210329.log.gz'))
+        fn = la.selectInputFile(TestFilesSelection.cfg, logging)
+        self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_20210329.log'))
 
     def test_find_last_report(self):
         pass

@@ -1,0 +1,43 @@
+import os
+
+myEnv = Environment(
+        platform = 'posix',
+        temp_dir = '/tmp',
+        src_dir = '../src',
+        test_dir = '.',
+        ENV = {'PYTHONPATH': "../src/"},
+        )
+
+myEnv.Command(
+        # test config file parser
+        target = '$temp_dir/test_config_file_parser.good',
+        source = [ '$src_dir/config_file_parser.py', '$test_dir/test_config_file_parser.py', ],
+        action = [ '$test_dir/test_config_file_parser.py', 'touch $TARGET' ],
+        )
+
+myEnv.Command(
+        # test NGinx log parser
+        target = "$temp_dir/test_nginx_log_parser.good",
+        source = ["$test_dir/test_nginx_log_parser.py", "$src_dir/nginx_log_parser.py"],
+        action = ["python $test_dir/test_nginx_log_parser.py", 'touch $TARGET' ],
+        )
+
+myEnv.Command(
+        # test log analyzer as a whole
+        target = "$temp_dir/test_log_analyzer.good",
+        source = ["$test_dir/test_log_analyzer.py", "$src_dir/log_analyzer.py"],
+        action = ["python $test_dir/test_log_analyzer.py", 'touch $TARGET' ],
+        )
+
+results = [
+        "$temp_dir/test_config_file_parser.good",
+        "$temp_dir/test_nginx_log_parser.good",
+        "$temp_dir/test_log_analyzer.good",
+        ]
+
+myEnv.Default(results)
+
+myEnv.Clean(
+        results,
+        '/tmp/TestDir',
+        )
