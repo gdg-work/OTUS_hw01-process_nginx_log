@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
-import unittest as ut
 import log_analyzer as la
+import program_config as pconf
+
+import unittest as ut
 import pathlib as pl
 import itertools as it
+import datetime
 import logging
 
 TEMPDIR = '/tmp'
@@ -16,8 +19,9 @@ class TestFilesSelection(ut.TestCase):
         cls._dir = pl.Path(TEMPDIR, 'TestDir')
         cls.in_dir = cls._dir / pl.Path('log')
         cls.out_dir = cls._dir / pl.Path('report')
+        cls.empty_dir = cls._dir / pl.Path('empty')
         # make test directories
-        for p in (cls._dir, cls.in_dir, cls.out_dir):
+        for p in (cls._dir, cls.in_dir, cls.out_dir, cls.empty_dir):
             p.mkdir()
         # create some files in the test directory
         for fake_date in range(20210310,20210331):
@@ -30,10 +34,10 @@ class TestFilesSelection(ut.TestCase):
                 else:
                     (cls.in_dir / pl.Path(fake_filename)).touch(mode=0o644)
 
-        cls.cfg = la.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
+        cls.cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
                            report_dir=str(TestFilesSelection.out_dir),
                            report_size=10, verbose=True,
-                           log_glob='nginx-test-acc_*log',
+                           log_glob='nginx-test-acc_*.log',
                            report_glob='rep*.html',
                            allow_exts=['gz'])
         return
@@ -43,7 +47,7 @@ class TestFilesSelection(ut.TestCase):
         for fn in it.chain(cls.in_dir.glob('*'), cls.out_dir.glob('*'),
                            (f for f in cls._dir.glob('*') if not f.is_dir())):
             fn.unlink()
-        for dir in (cls.in_dir, cls.out_dir, cls._dir):
+        for dir in (cls.in_dir, cls.out_dir, cls.empty_dir, cls._dir):
             dir.rmdir()
 
     @ut.skip('for testing of tests')
@@ -52,10 +56,25 @@ class TestFilesSelection(ut.TestCase):
         self.assertTrue(True)
 
     def test_find_last_log(self):
-        fn = la.selectInputFile(TestFilesSelection.cfg, logging)
+        fn = la.select_input_file(TestFilesSelection.cfg, logging)
         self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_20210329.log'))
 
-    def test_find_last_report(self):
+    def test_find_no_log(self):
+        norep_cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.empty_dir),
+                           report_dir=str(TestFilesSelection.out_dir),
+                           report_size=10, verbose=True,
+                           log_glob='nginx-test-acc_*log',
+                           report_glob='rep*.html',
+                           allow_exts=['gz'])
+        fn = la.select_input_file(norep_cfg, logging)
+        self.assertEqual(fn, None)
+
+    def test_parse_input_date(self):
+        in_fn = "/tmp/TestDir/log/nginx-test-acc_20210329.log"
+        date = la.parse_input_date(in_fn, TestFilesSelection.cfg, logging)
+        self.assertEqual(date, datetime.date(2021,3,29))
+
+    def test_make_report_name(self):
         pass
 
 if __name__ == "__main__":

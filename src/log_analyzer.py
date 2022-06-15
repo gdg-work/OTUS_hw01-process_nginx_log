@@ -9,13 +9,14 @@
 import argparse as ap
 import nginx_log_parser as nlp
 import config_file_parser as cfp
+import program_config as prgconf
 import pyparsing as pp
 import itertools as it
 import logging
 import sys
 import os
 import pathlib as pl
-import datetime
+import datetime as dt
 from typing import Optional
 
 # You can modify the default configuration here
@@ -27,178 +28,122 @@ CONFIG = """
     LOG_GLOB = nginx-access-ui.log-*.gz
     REPORT_GLOB = report-*.html
     ALLOW_EXTENSIONS = gz
-    LOG_DATE_FORMAT: '%Y%m%d'
-    REPORT_DATE_FORMAT: '%Y.%m.%d'
+    LOG_DATE_FORMAT: %Y%m%d
+    REPORT_DATE_FORMAT: %Y.%m.%d
 """
 
-class ConfigObj:
-    "Program configuration as an object"
-    def __init__(self, log_dir: str, report_dir: str, report_size: int,
-                 verbose: bool = False,
-                 log_glob: str = 'nginx_access-*.log', 
-                 report_glob: str = 'report-*.html',
-                 allow_exts: list[str] = [],
-                 log_date_format: str = "%Y%m%d",
-                 report_date_format: str = "%Y-%m-%d"):
-        self.log_dir     = log_dir
-        self.report_dir  = report_dir
-        self.report_size = int(report_size)
-        self.verbose     = verbose
-        self.log_glob    = log_glob
-        self.report_glob = report_glob
-        self.allow_exts  = set(allow_exts)
-        self.log_time_fmt = log_date_format
-        self.report_time_fmt = report_date_format
+def setup_functions(config, log):
+    """
+    Defines some functions with pre-defined parameters of 'configuration object'
+    and 'logger object'.
+    Returns a dictionary with function name as key and defined function as value
+    """
 
-    @classmethod
-    def from_cli(cls, cli_params, default_cfg):
-        "Initialize from parsed CLI parameters"
-        # first, use config file or a CLI config string
+    def check_config() -> bool:
+        log.debug('check_config called')
+        "Is the given config a valid one?"
+        src_dir = pl.Path(config.log_dir)
+        dest_dir = pl.Path(config.report_dir)
+        if not src_dir.exists():
+            log.error(f"Source directory <{src_dir}> doesn't exist")
+            return False
+        if dest_dir.exists() and not dest_dir.is_dir():
+            log.error("Destination path <{dest_dir}> exists and isn't a directory")
+            return False
+        # Shall we create non-existing output directory here? XXX
+        return True
+
+
+    def select_input_file() -> Optional[pl.Path]:
+        log.debug(f'select_input_file called, config.log_dir is <{config.log_dir}>, config.log_glob is <{config.log_glob}>')
+        src_dir = pl.Path(config.log_dir)
+        # Date format of YYYYMMDD allows us to sort files lexicographically searching
+        # for the last file. Here we chain iterators of log_glob per se and with all
+        # allowed extensions
         try:
-            defaults = cfp.parse_config(cfp.config, default_cfg, logging)
-            cfg = defaults
-        except pp.ParseException:
-            logging.error("Syntax error in default config!")
-            raise
-
-        if cli_params.config is not None:
-            try:
-                parsed = cfp.parse_config(cfp.config, cli_params.config, logging)
-            except pp.ParseException:
-                logging.error('Invalid config in command line')
-                raise
-            for key, value in parsed:
-                cfg[key] = value
-
-        else:
-            if cli_params.config_file is not None:
-                cfg_file_name = cli_params.config_file
-                try:
-                    with open(cfg_file_name, 'r') as f_cfg:
-                        cfg = cfp.config.parse_file(f_cfg)
-                except OSError:
-                    logging.error(f'Configuration file: <{cfg_file_name}> cannot be read')
-                    raise
-                except pp.ParseException:
-                    logging.error(f'Configuration file <{cfg_file_name}> is not parseable')
-                    raise
-
-        # overwrite params from CLI
-        if cli_params.report_size is not None:
-            cfg['report_size'] = cli_params.report_size
-        if cli_params.report_dir is not None:
-            cfg['report_dir'] = cli_params.report_dir
-        if cli_params.log_dir is not None:
-            cfg['log_dir'] = cli_params.log_dir
-        if cli_params.verbose is True:
-            cfg['verbose'] = True
-        if cli_params.report_glob is not None:
-            cfg['report_glob'] = cli_params.report_glob
-        if cli_params.log_glob is not None:
-            cfg['log_glob'] = cli_params.log_glob
-        if cli_params.allow_exts is not None:
-            cfg['allow_exts'] = list(cfp.ext_list.parse_string(cli_params.allow_exts))
-        return ConfigObj(cfg['log_dir'], cfg['report_dir'], int(cfg['report_size']),
-                         cfg['verbose'], cfg['log_glob'], cfg['report_glob'],
-                         cfg['allow_exts'])
-
-    def __repr__(self):
-        return("Program configuration: " + ", ".join([
-            "Report dir: {}".format(self.report_dir),
-            "Log dir: {}".format(self.log_dir),
-            "Verbose: {}".format(self.verbose),
-            "Report size: {}".format(self.report_size),
-            "Log template: {}".format(self.log_glob),
-            "Report template: {}".format(self.report_glob),
-            "Allowed extensions: {}".format(", ".join(list(self.allow_exts))),
-            "Log time format {}".format(self.log_time_fmt),
-            "Report time format: {}".format(self.report_time_fmt),
-            ]))
-
-
-def check_config(config, log) -> bool:
-    log.debug('check_config called')
-    "Is the given config a valid one?"
-    src_dir = pl.Path(config.log_dir)
-    dest_dir = pl.Path(config.report_dir)
-    if not src_dir.exists():
-        log.error(f"Source directory <{src_dir}> doesn't exist")
-        return False
-    if dest_dir.exists() and not dest_dir.is_dir():
-        log.error("Destination path <{dest_dir}> exists and isn't a directory")
-        return False
-    # Shall we create non-existing output directory here? XXX
-    return True
-
-def are_log_files_here(config, log) -> bool:
-    "Check if the input file(s) exists"
-    log.debug('are log files here')
-    src_dir = pl.Path(config.log_dir)
-    try:
-        next(it.chain(
-                src_dir.glob(config.log_glob),
-                it.chain.from_iterable([
-                    src_dir.glob(config.log_glob + ext)
-                    for ext in config.allow_exts
-            ])))
-    except StopIteration:
-        log.debug('are_log_files_here: no input files found')
-    return True
-
-def are_reports_here(config, log) -> bool:
-
-
-def select_input_file(config, log) -> Optional[pl.Path]:
-    log.debug('select_input_file called')
-    src_dir = pl.Path(config.log_dir)
-    # are there any source files?
-    if not are_log_files_here:
-        log.info('No input files found, exiting')
-        return None
-    # Date format of YYYYMMDD allows us to sort files lexicographically searching for the last file
-    try:
-        last_src_file = max(it.chain(
-                            src_dir.glob(config.log_glob),
-                            it.chain.from_iterable([
-                                src_dir.glob(config.log_glob + ext)
-                                for ext in config.allow_exts
-                        ])))
-        # check destination directory for report of that date
-        log.debug(f'select_input_file: Input file {last_src_file} found, processing')
-        return last_src_file
-    except ValueError:
-        # max() on empty sequence -- no input files found
-        log.debug('No input files matching glob found')
-        return None
-
-def parse_input_date(input_file_name, config, log) -> datetime.date:
-    log.debug('parse_input_date called with filename: {input_file_name}')
-    prefix, suffix = config.log_glob.split('*')
-    input_short_name = pl.Path(input_file_name).name
-    date_w_suffix = input_short_name[len(prefix):]
-    log.debug(f'parse_input_date::date with suffix: {date_w_suffix}')
-    date_only = date_w_suffix[1:date_w_suffix.index(suffix)+1]
-    log.debug(f'parse_input_date::date as string: {date_only}')
-    return datetime.date(2021,1,1)
-
-def search_for_report(input_file, config, log) -> Optional[pl.Path]:
-    log.debug('search_for_report called with input file: {input_file}')
-    dest_dir = pl.Path(config.report_dir)
-    # Does the output directory exists?
-    if dest_dir.is_dir():
-        log.debug('destination directory does exist')
-        if are_reports_here(config, log)
-            # Date format of YYYY.MM.DD allows us to use max() in the search of most recent file
-            last_report = max(dest_dir.glob(config.report_glob))
-            # select timestamp part from input file name and from last report name
-            infile_date = parse_input_date(input_file, config, log)
-        else:
-            # output directory doesnt contain report files
-            log.debug('No report files in the output directory')
+            last_src_file = max(it.chain(
+                                src_dir.glob(config.log_glob),
+                                it.chain.from_iterable([
+                                    src_dir.glob(config.log_glob + ext)
+                                    for ext in config.allow_exts
+                            ])))
+            # check destination directory for report of that date
+            log.debug(f'select_input_file: Input file {last_src_file} found, processing')
+            return last_src_file
+        except ValueError:
+            # max() on empty sequence -- no input files found
+            log.debug(f'No input files matching pattern <{config.log_glob}> found')
             return None
-    else:
-        log.debug("search_for_report: destination directory doesn't exist")
-        return None
+
+    def parse_input_date(input_file_name) -> Optional[dt.date]:
+        log.debug(f'parse_input_date called with filename: {input_file_name}')
+        prefix, suffix = config.log_glob.split('*')
+        input_short_name = pl.Path(input_file_name).name
+        date_w_suffix = input_short_name[len(prefix):]
+        log.debug(f'parse_input_date::date with suffix: {date_w_suffix}')
+        date_only = date_w_suffix[0:date_w_suffix.index(suffix)]
+        log.debug(f'parse_input_date::date as string: {date_only}')
+        try:
+            return dt.datetime.strptime(date_only, config.log_time_fmt).date()
+        except: 
+            log.error(f'parse_input_date::Unparseable date (format {config.log_time_fmt}, given string {date_only})')
+            return None
+
+    def make_report_filename(input_file) -> pl.Path:
+        log.debug(f'make_report_filename called with input file: {input_file}')
+        # Using the new 3.10 features here, could be done with if/else
+        match parse_input_date(input_file):
+            case None:
+                log.info('Invalid date in input file, trying to cope.  Will use current date instead')
+                report_date = dt.date.today().strftime(config.report_time_fmt)
+            case infile_date:
+                log.debug(f'search_for_report: input file date is: {infile_date}')
+                report_date = infile_date.strftime(config.report_time_fmt)
+        # construct report's name
+        prefix, suffix = config.report_glob.split('*')
+        report_file_name = pl.Path(prefix + report_date + suffix)
+        full_report_fn = pl.Path(config.report_dir / report_file_name)
+        log.debug(f'make_report_filename::constructed filename is: {full_report_fn}')
+        return full_report_fn
+
+    def search_for_report(input_file) -> Optional[pl.Path]:
+        log.debug(f'search_for_report called with input file: {input_file}')
+        dest_dir = pl.Path(config.report_dir)
+        # Does the output directory exists?
+        if dest_dir.is_dir():
+            log.debug('search_for_report::destination directory does exist')
+            full_report_fn = make_report_filename(input_file)
+            if full_report_fn.exists() and full_report_fn.is_file() and full_report_fn.stat().st_size > 0:
+                log.debug(f'search_for_report::Found existing report file: {full_report_fn}')
+                return full_report_fn
+            else:
+                # the file will be created/recreated
+                return None
+        else:
+            log.debug("search_for_report: destination directory doesn't exist")
+            return None
+
+    def process_files():
+        log.debug('process_files called with config and log')
+        input_fn = select_input_file()
+        if input_fn is None:
+            # no input files, that's normal
+            return
+        match search_for_report(input_fn):
+            case None:
+                pass
+            case pl.Path(file_name):
+                log.debug(f"Existing report file {file_name} found, no work to do")
+                pass
+        pass
+
+    return {
+            'check_config': check_config,
+            'select_input_file': select_input_file,
+            'parse_input_date': parse_input_date,
+            'make_report_filename': make_report_filename,
+            'process_files': process_files,
+        }
 
 def parse_cli(args) -> ap.Namespace:
     p = ap.ArgumentParser(
@@ -227,11 +172,6 @@ def parse_cli(args) -> ap.Namespace:
             help='Possible compressed log file extension like gz or bz2')
     return p.parse_args(args)
 
-def process_files(config, log):
-    log.debug('process_files called with config and log')
-    input_fn = select_input_file(config, log)
-    search_for_report(input_fn, config, log)
-    pass
 
 def setup_logger() -> logging.Logger:
     # create formatter
@@ -250,12 +190,13 @@ def main():
     # set up logging
     logger = setup_logger()
     try:
-        config = ConfigObj.from_cli(parse_cli(sys.argv[1:]), CONFIG)
+        config = prgconf.ConfigObj.from_cli(parse_cli(sys.argv[1:]), CONFIG)
         if config.verbose:
             logger.debug("Final configuration: \n" + str(config))
             logger.setLevel(logging.DEBUG)
-        if check_config(config, logger):
-            process_files(config, logger)
+        funs = setup_functions(config, logger)
+        if funs['check_config']():
+            funs['process_files']()
         else:
             logger.critical('Invalid configuration')
             sys.exit(1)

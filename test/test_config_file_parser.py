@@ -216,6 +216,16 @@ class TestConfigFileParser(ut.TestCase):
         self.assertEqual(dict(p), { 'report_size': '300',
                                     'report_dir' : "/tmp/report"})
 
+    def test_parse_datetime_meta(self):
+        t = cfp.log_date_format.run_tests([
+            'log_date_format: %Y%m%d',
+            'log_date_format: "%Y %m %d"',
+            'log_date_format: %m/%d/%y',
+            'log_date_format: "%Y%m%d"',
+            'log_date_format: %Y-%m-%d',
+            'log_date_format: "%b/%d/%y"',
+            ], failure_tests=False, print_results=True)
+        self.assertTrue(t[0], 'Good time metacharacters doesnt parse')
 
     def test_parse_config_fun(self):
         "Test parsing of config file with function from config_file_parser module"

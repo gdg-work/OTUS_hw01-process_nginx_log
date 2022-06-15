@@ -16,12 +16,23 @@ path         = pp.Word(pp.identbodychars + '.~/')
 true_val     = pp.one_of('true on 1', caseless=True).set_parse_action(pp.replace_with(True))
 false_val    = pp.one_of('false  off 0', caseless=True).set_parse_action(pp.replace_with(False))
 bool_val     = pp.Or([true_val, false_val])
-# -- filenames
+# -- time strings in filenames
 time_metachars = pp.one_of('%Y %m %d %H %M %S %B %b %z')
+time_meta_year  = '%Y'
+time_meta_day   = '%d'
+time_meta_month = '%m'
+time_pattern_quoted = pp.QuotedString(quote_char='"').set_results_name('time_meta')
+time_pattern_unquoted = pp.Word(pp.printables).set_results_name('time_meta')
+time_pattern = pp.Or([time_pattern_unquoted, time_pattern_quoted])
+
 time_format  = pp.OneOrMore(time_metachars)
+misc_junk    = pp.SkipTo(time_metachars)
+end_junk     = pp.SkipTo(pp.LineEnd())
+# -- digital values for date/time
 year         = pp.Word(pp.nums, exact=4)  # very primitive now, can be extended
 month        = pp.Word(pp.nums, exact=2)
 day          = pp.Word(pp.nums, exact=2)
+# filename globbing
 star         = pp.Char('*')
 date_wo_seps = pp.Combine(year + month + day).set_results_name('date')
 date_w_seps  = pp.Combine(year + pp.Suppress('.') + month + pp.Suppress('.') + day).set_results_name('date')
@@ -53,9 +64,14 @@ log_glob     = pp.Optional(pp.Suppress(pp.CaselessKeyword('log_glob')) +
                 var_name_separator + fileglob_tmpl.set_results_name('log_glob'))
 report_glob  = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_glob')) +
                 var_name_separator + fileglob_tmpl.set_results_name('report_glob'))
+log_date_format = pp.Optional(pp.Suppress(pp.CaselessKeyword('log_date_format')) + 
+                var_name_separator + time_pattern)
+report_date_format = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_date_format')) + 
+                var_name_separator + time_pattern)
 # -- config as a whole
 config       = pp.Each([comment_line, report_size, report_dir, log_dir,
-                        verbose_flag, log_glob, report_glob, allow_exts])
+                        verbose_flag, log_glob, report_glob, allow_exts,
+                        log_date_format, report_date_format])
 # ---- End of config file parsing ----
 
 def parse_config(parser_obj, config_string, log) -> dict:
