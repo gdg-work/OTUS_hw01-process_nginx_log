@@ -100,11 +100,11 @@ class TestLogParser(ut.TestCase):
             http:/
             https:/
             ftp:/
+            file:/
             ''', print_results=False)
         self.assertTrue(t1[0], 'Good protocol doesnt parse')
         t2 = nlp.urlProto.run_tests('''
             # bad protocol selectors
-            file:/
             unknown:/
             http::/
             https/
@@ -121,7 +121,7 @@ class TestLogParser(ut.TestCase):
             ''', print_results=False)
         self.assertTrue(t3[0], 'Error of parsing good URL')
         t4 = nlp.urlString.run_tests('''
-            # bad samples of  URLs for parsing
+            bad samples of  URLs for parsing
             httpa://www.ya.ru
             https:/www.ya.ru
             ftp//ftp.ya.ru
@@ -178,6 +178,7 @@ class TestLogParser(ut.TestCase):
             1.196.116.32 -  - [29/Jun/2017:03:50:23 +0300] "GET /api/v2/banner/24913311 HTTP/1.1" 200 897 "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5" "-" "1498697422-2190034393-4708-9752748" "dc7161be3" 1.243
             1.196.116.32 -  - [29/Jun/2017:03:50:23 +0300] "GET /api/v2/banner/25019908 HTTP/1.1" 200 989 "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5" "-" "1498697422-2190034393-4708-9752760" "dc7161be3" 1.321
             1.196.116.32 -  - [29/Jun/2017:03:50:23 +0300] "GET /api/v2/banner/24998073 HTTP/1.1" 200 983 "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5" "-" "1498697422-2190034393-4708-9752755" "dc7161be3" 1.403
+            1.166.249.64 2a828197ae235b0b3cb  - [29/Jun/2017:04:00:12 +0300] "GET / HTTP/1.1" 302 5 "-" "Lynx/2.8.8dev.9 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/2.10.5" "-" "1498698012-1082475993-4708-9758092" "-" 0.122
             ''', print_results=False)
         self.assertTrue(t1[0], 'Error of parsing good log lines')
         t2 = nlp.logLine.run_tests('''

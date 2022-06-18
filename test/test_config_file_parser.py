@@ -96,6 +96,26 @@ class TestConfigFileParser(ut.TestCase):
             ''', failure_tests=True, print_results=False)
         self.assertTrue(t2[0], 'Bad verbosity flag parsed successfully')
 
+    def test_timepattern(self):
+        t = cfp.time_pattern.run_tests("""
+                %F
+                %Y%m%d
+                %d.%m.%Y
+                %d-%b-%Y
+                %b;%d;%Y
+                %b_%d_%Y
+                """, print_results=False)
+        self.assertTrue(t[0], 'Good date patterns doesnt parse')
+
+    def test_log_pattern(self):
+        lp = cfp.fileglob_tmpl.run_tests('''
+                nginx_log-%F
+                nginx-%F_log.log
+                nginx-access_%Y%m%d.log
+                ''', print_results=False)
+        self.assertTrue(lp[0], 'Good log pattern doesnt pass')
+
+    @ut.skip('excluded due to changed file name conception')
     def test_filename_parser(self):
         t1 = cfp.fileglob_star_middle.run_tests('''
             somefile*continue
@@ -152,7 +172,7 @@ class TestConfigFileParser(ut.TestCase):
 
     def test_config_parser(self):
         t = cfp.config.run_tests(
-            'report_size: 250 report_dir: /tmp log_dir: /var/log verbose: false report_glob=report_*.html log_glob=nginx_access-*.log',
+            'report_size: 250 report_dir: /tmp log_dir: /var/log verbose: false report_glob=report_%F.html log_glob=nginx_access_%F.log',
             print_results=False)
         self.assertTrue(t[0], 'Good config doesnt parse')
 
@@ -162,26 +182,23 @@ class TestConfigFileParser(ut.TestCase):
             report_dir = /tmp/report
             log_dir: /tmp/log
             verbose: 1
-            report_glob: report_*.html
-            log_glob: nginx_access-*.log
+            report_glob: report_%F.html
+            log_glob: nginx_access-%Y%m%d.log
             """], comment=None, print_results=False)
         self.assertTrue(t[0], 'Good multiline config doesnt parse')
 
     @ut.skip('was used for selecting different values from test data')
     def test_config_parser_printparsed(self):
-        t = cfp.config.run_tests(["""
+        cfg_str = """
             report_size: 300
             report_dir = /tmp/report
             log_dir: /tmp/log
             verbose: 1
-            report_glob = report_*.html
-            log_glob = nginx_access-*.log
-            """], comment=None, print_results=False)
+            report_glob = report_%F.html
+            log_glob = nginx_access-%F.log
+        """
+        t = cfp.config.run_tests([cfg_str], comment=None, print_results=False)
         self.assertTrue(t[0], 'Good multiline config doesnt parse')
-        print('\nParsed report size -> ', t[1][0][1]['report_size'])
-        print('\nParsed report dir  -> ', t[1][0][1]['report_dir'])
-        print('\nParsed log dir     -> ', t[1][0][1]['log_dir'])
-        print('\nParsed verbosity   -> ', t[1][0][1]['verbose'])
 
     def test_config_parser_results(self):
         p = cfp.config.parse_string('''
@@ -189,16 +206,16 @@ class TestConfigFileParser(ut.TestCase):
                 report_dir = /tmp/report
                 log_dir: /tmp/log
                 verbose: 1
-                report_glob = report_*.html
-                log_glob = nginx_access-*.log
+                report_glob = report_%Y%m%d.html
+                log_glob = nginx_access-%F.log
                 allow_extensions = bz2,zst,xz
             ''')
         self.assertEqual(p.verbose, True, 'Incorrect verbosity parsed')
         self.assertEqual(p.report_size, '300', 'Incorrect report size parsed')
         self.assertEqual(p.report_dir, "/tmp/report", 'Incorrect report dir')
         self.assertEqual(p.log_dir, "/tmp/log", 'Incorrect log dir')
-        self.assertEqual(p.log_glob, "nginx_access-*.log", 'Incorrect log glob pattern')
-        self.assertEqual(p.report_glob, "report_*.html", 'Incorrect report glob pattern')
+        self.assertEqual(p.log_glob, "nginx_access-%F.log", 'Incorrect log glob pattern')
+        self.assertEqual(p.report_glob, "report_%Y%m%d.html", 'Incorrect report glob pattern')
         self.assertEqual(list(p.allowed_exts), ['bz2', 'zst', 'xz'], 'Incorrect parsing of allowed extensions list')
 
     def test_subsets_config(self):
@@ -216,16 +233,12 @@ class TestConfigFileParser(ut.TestCase):
         self.assertEqual(dict(p), { 'report_size': '300',
                                     'report_dir' : "/tmp/report"})
 
-    def test_parse_datetime_meta(self):
-        t = cfp.log_date_format.run_tests([
-            'log_date_format: %Y%m%d',
-            'log_date_format: "%Y %m %d"',
-            'log_date_format: %m/%d/%y',
-            'log_date_format: "%Y%m%d"',
-            'log_date_format: %Y-%m-%d',
-            'log_date_format: "%b/%d/%y"',
-            ], failure_tests=False, print_results=True)
-        self.assertTrue(t[0], 'Good time metacharacters doesnt parse')
+    def test_make_glob_fun(self):
+        "test converting strptime pattern to shell globbing pattern"
+        self.assertEqual(cfp.template_to_glob('report_%F.html'), "report_20[0-9][0-9]-[01][0-9]-[0-3][0-9].html")
+        self.assertEqual(cfp.template_to_glob('nginx_access_%Y%m%d.log'), "nginx_access_20[0-9][0-9][01][0-9][0-3][0-9].log")
+        self.assertEqual(cfp.template_to_glob('nginx_access_%m-%d.log'), "nginx_access_[01][0-9]-[0-3][0-9].log")
+        self.assertEqual(cfp.template_to_glob('nginx_access_%b-%d.log'), "nginx_access_[A-Z][a-z][a-z]-[0-3][0-9].log")
 
     def test_parse_config_fun(self):
         "Test parsing of config file with function from config_file_parser module"
@@ -234,8 +247,8 @@ class TestConfigFileParser(ut.TestCase):
             report_dir = /tmp/report
             log_dir: /tmp/log
             verbose: 1
-            report_glob = report_*.html
-            log_glob = nginx_access-*.log
+            report_glob = report_%F.html
+            log_glob = nginx_access-%Y%m%d.log
             allow_extensions = gz,zst,xz
         """
         cfg_p = cfp.parse_config(cfp.config, s, log)
@@ -243,8 +256,8 @@ class TestConfigFileParser(ut.TestCase):
         self.assertEqual(cfg_p['report_size'], '300', 'Incorrect report size parsed')
         self.assertEqual(cfg_p['report_dir'], "/tmp/report", 'Incorrect report dir')
         self.assertEqual(cfg_p['log_dir'], "/tmp/log", 'Incorrect log dir')
-        self.assertEqual(cfg_p['log_glob'], "nginx_access-*.log", 'Incorrect log glob pattern')
-        self.assertEqual(cfg_p['report_glob'], "report_*.html", 'Incorrect report glob pattern')
+        self.assertEqual(cfg_p['log_glob'], "nginx_access-%Y%m%d.log", 'Incorrect log glob pattern')
+        self.assertEqual(cfg_p['report_glob'], "report_%F.html", 'Incorrect report glob pattern')
         self.assertEqual(cfg_p['allow_exts'], ['gz', 'zst', 'xz'], 'Incorrect report glob pattern')
 
 if __name__ == "__main__":

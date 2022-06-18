@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import pyparsing as pp
-import typing as t
+from typing import Optional
 
 # ------- Config file parsing ----------
 #     # optional comment to end of line
@@ -8,6 +8,10 @@ import typing as t
 #     REPORT_DIR: ./reports,
 #     LOG_DIR: ./log,
 #     VERBOSE: True,
+#     REPORT_GLOB : report-%Y-%m-%d.html
+#     LOG_GLOB   : nginx_log-%Y%m%d
+#     ALLOW_EXTS : gz, bz2
+#     JOURNAL: /tmp/nginx_parser.log
 
 var_name_separator = pp.Suppress(pp.Char(':='))
 comment_line = pp.Optional(pp.LineStart() + '#' + pp.SkipTo(pp.LineEnd()))
@@ -16,34 +20,28 @@ path         = pp.Word(pp.identbodychars + '.~/')
 true_val     = pp.one_of('true on 1', caseless=True).set_parse_action(pp.replace_with(True))
 false_val    = pp.one_of('false  off 0', caseless=True).set_parse_action(pp.replace_with(False))
 bool_val     = pp.Or([true_val, false_val])
-# -- time strings in filenames
-time_metachars = pp.one_of('%Y %m %d %H %M %S %B %b %z')
-time_meta_year  = '%Y'
-time_meta_day   = '%d'
-time_meta_month = '%m'
-time_pattern_quoted = pp.QuotedString(quote_char='"').set_results_name('time_meta')
-time_pattern_unquoted = pp.Word(pp.printables).set_results_name('time_meta')
-time_pattern = pp.Or([time_pattern_unquoted, time_pattern_quoted])
 
-time_format  = pp.OneOrMore(time_metachars)
-misc_junk    = pp.SkipTo(time_metachars)
-end_junk     = pp.SkipTo(pp.LineEnd())
-# -- digital values for date/time
-year         = pp.Word(pp.nums, exact=4)  # very primitive now, can be extended
-month        = pp.Word(pp.nums, exact=2)
-day          = pp.Word(pp.nums, exact=2)
-# filename globbing
-star         = pp.Char('*')
-date_wo_seps = pp.Combine(year + month + day).set_results_name('date')
-date_w_seps  = pp.Combine(year + pp.Suppress('.') + month + pp.Suppress('.') + day).set_results_name('date')
-report_fn_tmpl =  pp.Keyword('report') + '-' + star + '.' + pp.Keyword('html')
-compress_ext = pp.Optional(pp.Literal('.gz'))
-path_element = pp.Word(pp.alphanums + '-_+.@#%^=[]{}(),')
-# -- file glob is a combination of optional path element, star, optional path element and optional compress suffix
-fileglob_star_middle = pp.Combine(path_element + star + path_element + compress_ext)
-fileglob_star_end = pp.Combine(path_element + star + compress_ext)
-fileglob_star_beginning = pp.Combine( star + path_element + compress_ext)
-fileglob_tmpl  = pp.Or([fileglob_star_middle, fileglob_star_end, fileglob_star_beginning])
+# -- time strings in filenames
+supported_time_metas = pp.Char('YmdbF')
+time_metachar = pp.Combine('%' + supported_time_metas)
+time_other = pp.Optional(pp.Word(pp.alphanums + '-;_!@#$^&*([{}]),.<>/?`'))
+time_pattern = pp.Combine(time_metachar +
+                          pp.ZeroOrMore(time_other + 
+                                        time_metachar)).set_results_name('time_fmt')
+
+path_element = pp.Word(pp.alphanums + '-_+.@#^=[]{}(),')  # Note the absense of '%'
+
+# -- filenames with strptime metacharacters to be replaced with date/time components
+fileglob_time_middle = pp.Combine(path_element + time_pattern + path_element)
+fileglob_time_end = pp.Combine(path_element + time_pattern)
+fileglob_time_beginning = pp.Combine( time_pattern + path_element)
+fileglob_tmpl  = pp.Or([fileglob_time_middle,
+                        fileglob_time_end,
+                        fileglob_time_beginning]).set_results_name('fname_template')
+# -- log file
+my_journal = pp.Optional(pp.Suppress(pp.CaselessKeyword('journal')) + var_name_separator +
+              path.set_results_name('journal'))
+
 # -- files extensions list
 ext_component = pp.Word(pp.alphanums, min=1, max=4)  # .zest
 ext_keyword   = pp.CaselessKeyword('allow_extensions')
@@ -71,10 +69,27 @@ report_date_format = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_date_for
 # -- config as a whole
 config       = pp.Each([comment_line, report_size, report_dir, log_dir,
                         verbose_flag, log_glob, report_glob, allow_exts,
-                        log_date_format, report_date_format])
+                        log_date_format, report_date_format, my_journal])
 # ---- End of config file parsing ----
 
-def parse_config(parser_obj, config_string, log) -> dict:
+def template_to_glob(tmpl :str) -> str:
+    """converts filename template with strptime metacharacters to
+       shell globbing pattern.  Not all metacharacters are supported yet, only %[YmdbF]
+       Years are limited by pattern 20xx, where x is [0-9]
+    """
+    metachar_table = {
+        '%F': '20[0-9][0-9]-[01][0-9]-[0-3][0-9]',
+        '%Y': '20[0-9][0-9]',
+        '%m': '[01][0-9]',
+        '%d': '[0-3][0-9]',
+        '%b': '[A-Z][a-z][a-z]',
+        }
+    curstr = tmpl
+    for mc in metachar_table.keys():
+        curstr = curstr.replace(mc, metachar_table[mc])
+    return curstr
+
+def parse_config(parser_obj, config_string, log) -> Optional[dict]:
     try:
         parsed = parser_obj.parse_string(config_string)
         if parsed:
@@ -92,10 +107,12 @@ def parse_config(parser_obj, config_string, log) -> dict:
                 'log_glob'   : parsed.log_glob,
                 'allow_exts' : extensions_list
             }
+        else:
+            log.error(f"Trying to parse empty string <{config_string}> as a program configuration")
+            return None
     except pp.ParseException:
-        log.critical(f"Cannot parse configuration: <{config_string}>, exiting")
-        raise pp.ParseException('Unparseable config')
-    return {}
+        log.error(f"Cannot parse configuration: <{config_string}>")
+        return None
 
 
 if __name__ == "__main__":

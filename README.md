@@ -76,6 +76,17 @@ Built-in config is:
 	LOG_GLOB = nginx-access-ui.log-*.gz
 	REPORT_GLOB = report-*.html
 	ALLOW_EXTENSIONS = gz
-	LOG_DATE_FORMAT: '%Y%m%d'
-	REPORT_DATE_FORMAT: '%Y.%m.%d'
 ```
+
+When all your log files are compressed, please don't include compression extension to `log_glob`,
+it will cause time/date parsing errors.  Use `allow_extensions` parameter.
+
+## Open questions
+
+Открытые вопросы, на которые я пока не знаю ответа.
+
+1.  Часть URL представляет собой запросы к API, у которых есть параметры.
+    Есть ли смысл отбрасывать параметры, учитывая, что они могут меняться?  
+
+    На мой взгляд, да: получим более объективную картину, иначе сто запросов к 
+    одному URL с разными параметрами дадут нам сто строк в итоговой таблице.

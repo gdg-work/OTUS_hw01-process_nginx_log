@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-import logging
 # https://pyparsing-docs.readthedocs.io/en/latest/HowToUsePyparsing.html#classes-in-the-pyparsing-module
 import pyparsing as pp
 import time
 import locale
+from collections import namedtuple
+import logging
+from typing import Optional
+from math import floor
 
 locale.setlocale(locale.LC_TIME,"C")
 
@@ -66,11 +69,11 @@ timeStamp.set_parse_action(validate_date)
 requestType   = pp.MatchFirst([pp.Literal(s) for s in
                        "GET POST CONNECT DELETE HEAD OPTIONS PATCH PUT TRACE".split()]).set_results_name('request')
 httpVersion   = pp.MatchFirst([pp.Literal('HTTP/1.0'), pp.Literal('HTTP/1.1')])
-urlSchemas = ['http', 'https', 'ftp', 'gopher']
-urlSchemas = [pp.Literal(s) for s in urlSchemas] + [pp.Literal(s.upper()) for s in urlSchemas]
+urlSchemas = ['http', 'https', 'ftp', 'gopher', 'file']
+urlSchemas = [pp.CaselessKeyword(s) for s in urlSchemas]
 urlProto = pp.Or(urlSchemas) + pp.Suppress(':/') 
 urlChars = pp.alphanums + "/.?&=?_-#%"                 # URL parsing is rather simplistic yet
-urlString = pp.Combine(pp.Opt(urlProto) + '/' + pp.Word(urlChars)).set_results_name('url')
+urlString = pp.Combine(pp.Opt(urlProto) + '/' + pp.Opt(pp.Word(urlChars))).set_results_name('url')
 httpRequestData = skipQuote + requestType + urlString + pp.Suppress(httpVersion) + \
                   skipQuote.set_results_name('request')
 # remote user, remote IP
@@ -88,6 +91,20 @@ rbUser       = skipQuote + ... + skipQuote
 requestDuration = realNum.set_results_name('duration')
 logLine = ( pp.LineStart() + pp.Suppress(ipAddrV4) +  remoteUser + realIP + pp.Suppress('[') + timeStamp + pp.Suppress(']') + httpRequestData +  statusCode + bytesTransferred + refererUrl +  userAgent + forwardedFor + requestID + rbUser + requestDuration + pp.LineEnd() )
 # ---------- end of log file parsing ---------
+
+Request = namedtuple('Request', ['ts', 'url', 'duration'])
+
+def parse_log_line(log_line: str, log: logging.Logger) -> Optional[Request]:
+    try:
+        pll = logLine.parse_string(log_line)
+        # small optimization: multiply durations to 1000, drop fractional part. 
+        # This express time in milliseconds.
+        int_duration = floor(float(pll.duration) * 1000)
+        return Request(pll.ts, pll.url, int_duration)
+    except pp.ParseException:
+        log.debug('Error parsing the line ' + log_line)
+        return None
+
 
 if __name__ == "__main__":
     print("This is a library, not a program")

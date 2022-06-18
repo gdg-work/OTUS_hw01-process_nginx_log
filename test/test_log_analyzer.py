@@ -20,6 +20,8 @@ class TestFilesSelection(ut.TestCase):
         cls.in_dir = cls._dir / pl.Path('log')
         cls.out_dir = cls._dir / pl.Path('report')
         cls.empty_dir = cls._dir / pl.Path('empty')
+        # set up logging 
+        cls.logger = logging.getLogger('test_log_analyzer')
         # make test directories
         for p in (cls._dir, cls.in_dir, cls.out_dir, cls.empty_dir):
             p.mkdir()
@@ -34,12 +36,13 @@ class TestFilesSelection(ut.TestCase):
                 else:
                     (cls.in_dir / pl.Path(fake_filename)).touch(mode=0o644)
 
-        cls.cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
+        cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
                            report_dir=str(TestFilesSelection.out_dir),
                            report_size=10, verbose=True,
-                           log_glob='nginx-test-acc_*.log',
-                           report_glob='rep*.html',
-                           allow_exts=['gz'])
+                           log_glob='nginx-test-acc_%Y%m%d.log',
+                           report_glob='report_%F.html',
+                           allow_exts=['gz'],)
+        cls.funcs_table = la.setup_functions(cfg, cls.logger)
         return
 
     @classmethod
@@ -56,26 +59,32 @@ class TestFilesSelection(ut.TestCase):
         self.assertTrue(True)
 
     def test_find_last_log(self):
-        fn = la.select_input_file(TestFilesSelection.cfg, logging)
+        select_input_file = TestFilesSelection.funcs_table['select_input_file']
+        fn = select_input_file()
         self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_20210329.log'))
 
     def test_find_no_log(self):
         norep_cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.empty_dir),
                            report_dir=str(TestFilesSelection.out_dir),
                            report_size=10, verbose=True,
-                           log_glob='nginx-test-acc_*log',
-                           report_glob='rep*.html',
+                           log_glob='nginx-test-acc_%Y%m%d.log',
+                           report_glob='rep_%Y-%m-%d.html',
                            allow_exts=['gz'])
-        fn = la.select_input_file(norep_cfg, logging)
+
+        fn = la.setup_functions(norep_cfg, TestFilesSelection.logger)['select_input_file']()
         self.assertEqual(fn, None)
 
     def test_parse_input_date(self):
         in_fn = "/tmp/TestDir/log/nginx-test-acc_20210329.log"
-        date = la.parse_input_date(in_fn, TestFilesSelection.cfg, logging)
+        parse_input_date = TestFilesSelection.funcs_table['parse_input_date']
+        date = parse_input_date(in_fn)
         self.assertEqual(date, datetime.date(2021,3,29))
 
     def test_make_report_name(self):
-        pass
+        mkname = TestFilesSelection.funcs_table['make_report_filename']
+        name = mkname('nginx-test-acc_20220102.log')
+        self.assertEqual(name, pl.Path('/tmp/TestDir/report/report_2022-01-02.html'))
+
 
 if __name__ == "__main__":
     ut.main()
