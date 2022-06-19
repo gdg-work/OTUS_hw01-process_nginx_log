@@ -16,23 +16,12 @@ import sys
 import fileinput
 import pathlib as pl
 import datetime as dt
-from typing import Optional, Union, NamedTuple, Callable
-from collections.abc import MutableMapping
+from dataclasses import dataclass
+from typing import Optional, Union, NamedTuple, Callable, Any
+from collections.abc import  MutableMapping
 from enum import Enum
 import json
 
-# You can modify the default configuration here
-CONFIG = """
-    REPORT_SIZE: 100
-    REPORT_DIR: /tmp/test/report/
-    LOG_DIR: /tmp/test/log/
-    VERBOSE: off
-    LOG_GLOB: nginx-access-ui.log-%Y%m%d
-    REPORT_GLOB: report-%Y.%m.%d.html
-    ALLOW_EXTENSIONS: gz
-    # Next line is for optional journal file.
-    # JOURNAL:
-"""
 
 # Some pseudo constants for logger (see logging module documentation)
 LOG_LINE_FORMAT = r'%(asctime)s: %(levelname).1s -- %(message)s'
@@ -41,6 +30,81 @@ LOG_DATE_FORMAT = r'%Y.%m.%d %H:%M:%S'
 class ReportFileState(Enum):
     NOFILE = 1
     NODIR = 2
+
+class UrlInfo(NamedTuple):
+    """all the URL information will be collected here. The URL itself will
+       be a key in the dictionary where this tuple will be a value"""
+    occurencies: int = 0
+    max_latency: int = 0
+    sum_latency: int = 0
+    # durations: list[int] = []
+
+@dataclass(frozen=True)
+class GeneralStats:
+    """General statistics, i.e. requests count and total time used for requests
+    processing"""
+    total_records: int
+    sum_latency  : int
+
+@dataclass(frozen=True)
+class OutputUrlStats:
+    "fields for JSON output"
+    url       : str
+    count     : int
+    time_avg  : float
+    time_max  : float
+    time_sum  : float
+    time_med  : float
+    time_perc : float
+    count_perc: float
+
+UrlDict     = MutableMapping[str, UrlInfo]
+StatsResult = tuple[UrlDict, GeneralStats]
+
+# -- trying to re-implement Rust Status class
+@dataclass(frozen=True)
+class Err:
+    msg: str = 'Some error occured'
+
+@dataclass(frozen=True)
+class Ok:
+    data : Any = None
+
+StatusWithData = Union[Err, Ok]
+
+def compute_output_stats(url: str, url_info: UrlInfo, total_count: int,
+                         total_duration: int) -> OutputUrlStats:
+    return OutputUrlStats(
+        url        = url,
+        count      = url_info.occurencies,
+        time_max   = float(url_info.max_latency) / 1000,
+        time_sum   = float(url_info.sum_latency) / 1000,
+        time_med   = 0.0,
+        time_perc  = float(100*url_info.sum_latency)/float(total_duration),
+        count_perc = float(100*url_info.occurencies)/float(total_count),
+        time_avg   = url_info.sum_latency / (url_info.occurencies * 1000),
+        )
+
+def process_stats(stats: StatsResult) -> list[OutputUrlStats]:
+    """Computes some summary statistics about processing duration/latencies"""
+    url_stats, totals = stats
+    # sort URL statistics by sum duration and take first N from them
+    # url_stats.sort
+    # url.stats.take_first(config.report_size)
+    return ([ compute_output_stats(url, rec, totals.total_records, totals.sum_latency)
+               for url, rec in url_stats.items() ])
+
+class OutputJSONEncoder(json.JSONEncoder):
+    """Helper class for encoding OutputUrlStats to JSON"""
+
+    def default(self, out_rec):
+        if isinstance(out_rec, OutputUrlStats):
+            return out_rec.__dict__
+        else:
+            return super().default(out_rec)
+
+def output_to_json(stats_list: list[OutputUrlStats]) -> str:
+    return json.dumps(stats_list, cls=OutputJSONEncoder, separators=(',', ':')) 
 
 def setup_functions(config, log):
     """
@@ -54,6 +118,7 @@ def setup_functions(config, log):
         "Is the given config a valid one?"
         src_dir = pl.Path(config.log_dir)
         dest_dir = pl.Path(config.report_dir)
+        report_tmpl = pl.Path(config.template_html)
         try:
             if not src_dir.exists():
                 log.error(f"Source directory <{src_dir}> doesn't exist")
@@ -63,6 +128,15 @@ def setup_functions(config, log):
                 return False
         except PermissionError:
             log.critical(f"Permission denied checking source dir {src_dir} and destination dir {dest_dir}")
+            return False
+        if report_tmpl.exists() and report_tmpl.is_file():
+            try:
+                with open(report_tmpl, "r") as f_in:
+                    _ = f_in.read(1)  # read one byte to check the file
+            except OSError:
+                log.critical(f"Cannot read a template for report from file: <{report_tmpl}>")
+                return False
+        else:
             return False
         return True
 
@@ -104,7 +178,7 @@ def setup_functions(config, log):
             return last_src_file
         except ValueError:
             # max() on empty sequence -- no input files found
-            log.debug(f'No input files matching pattern <{config.log_glob}> found')
+            log.info(f'No input files matching pattern <{config.log_glob}> found')
             return None
 
     def make_report_filename(input_file) -> pl.Path:
@@ -139,22 +213,6 @@ def setup_functions(config, log):
             log.debug("search_for_report: destination directory doesn't exist")
             return ReportFileState.NODIR
 
-    class UrlInfo(NamedTuple):
-        """all the URL information will be collected here. The URL itself will
-           be a key in the dictionary where this tuple will be a value"""
-        occurencies: int = 0
-        max_latency: int = 0
-        sum_latency: int = 0
-        # durations: list[int] = []
-
-    class GeneralStats(NamedTuple):
-        """General statistics, i.e. requests count and total time used for requests processing"""
-        total_records: int = 0
-        sum_latency: int = 0
-
-    UrlDict = MutableMapping[str, UrlInfo]
-    StatsResult = tuple[UrlDict, GeneralStats]
-
     def add_to_stats(url, duration, url_stats: UrlDict, gen_stats: GeneralStats):
         # trying creation of docstrings from list of strings
         " ".join(["Add current record to statistics in url_stats and gen_stats variables.",
@@ -173,13 +231,13 @@ def setup_functions(config, log):
         gen_stats = GeneralStats(total_records = gen_stats.total_records +1, sum_latency= gen_stats.sum_latency + duration)
         return url_stats, gen_stats
 
-
     def process_one_file(in_file_name: pl.Path) -> Optional[StatsResult]:
         log.debug(f'process_one_file::called with params {in_file_name}')
         # iterate over lines of (possibly compressed) file
         bad_lines_counter = 0
+        good_lines_counter = 0
         read_lines_counter = 0
-        general_stats = GeneralStats()
+        general_stats = GeneralStats(0, 0)
         url_stats = {}
         try:
             with fileinput.input(files=in_file_name, encoding='utf-8',
@@ -195,9 +253,9 @@ def setup_functions(config, log):
                             if duration > 0:
                                 # ignore timestamp for now
                                 url_stats, general_stats = add_to_stats(url, duration,  url_stats, general_stats)
-                            pass
+                            good_lines_counter += 1
             log.info(f'% of bad lines in file {in_file_name}: ' +
-                    "{:3.1f}".format(bad_lines_counter * 100 / read_lines_counter))
+                    "{:3.1f}".format(bad_lines_counter * 100 / (good_lines_counter + bad_lines_counter)))
             return (url_stats, general_stats)
         except PermissionError:
             log.critical('Permission denied reading input file')
@@ -206,30 +264,43 @@ def setup_functions(config, log):
             log.critical('Cannot read input file {in_file_name} (OSError)')
             return None
 
-    class OutputUrlStats(NamedTuple):
-        url: str
-        count: int
-        time_avg: float
-        time_max: float
-        time_sum: float
-        time_med: float
-        time_perc: float
-        count_perc: float
+    def read_report_template() -> Optional[str]:
+        """Tries to read report template from file in configuration object,
+        returns contents of the file or None when read failed"""
+        try:
+            with open(config.template_html, 'r', encoding='utf8') as f_in:
+                return f_in.read()
+        except OSError:
+            log.critical(f'Error reading report template from file <{config.template_html}>')
+            return None
 
-    def compute_output_stats(UrlInfo, total_count, total_duration) -> OutputUrlStats:
-        return None
+    def make_report(json_data: str) -> Optional[str]:
+        "Mates json data and template to make formatted report"
+        report_template = read_report_template()
+        if report_template is not None:
+            return report_template.replace(r'$table_json', json_data, 1)
+        else:
+            log.critical(f'Error reading HTML template file <{config.template_html}>')
+            return None
 
-    def process_stats(stats: StatsResult) -> list[OutputUrlStats]:
-        """Computes some summary statistics about processing duration/latencies"""
-        url_stats = stats[0]
-        total_count = stats[1].total_records
-        total_duration = stats[1].sum_latency
-        # sort URL statistics by sum duration and take first N from them
-        # url_stats.sort
-        out = [compute_output_stats(rec, total_count, total_duration)
-               for rec in url_stats
-              ]
-        return out
+    def write_json_to_output_file(json_data: str, input_fn: pl.Path) -> StatusWithData:
+        if input_fn is None:
+            # I know, at this point input_fn will definitely not be None, but...
+            log.critical("No input file given, cannot construct output file")
+            return Err(msg = "No input file name given, cannot create output")
+        else:
+            output_fn = make_report_filename(input_fn)
+            report_html = make_report(json_data)
+            if report_html is None:
+                return Err('Null HTML output')
+            else:
+                try:
+                    with open(output_fn, 'w', encoding='utf8') as out_f:
+                        bytes_written = out_f.write(make_report(json_data))
+                        return Ok(data = bytes_written)
+                except OSError:
+                    log.critical(f"Error writing to output file <{output_fn}>, disk full?")
+                    return Err(msg = "Error writing to output file")
 
     def process_files():
         log.debug(f'process_files called')
@@ -251,7 +322,13 @@ def setup_functions(config, log):
             case ReportFileState.NOFILE:
                 stats = process_one_file(input_fn)
                 if stats is not None:
-                    process_stats(stats)
+                    match write_json_to_output_file(
+                                output_to_json(process_stats(stats)),
+                                input_fn):
+                        case Ok(data=bytes_written):
+                            log.info(f'Finished, {bytes_written} bytes written to output file')
+                        case Err(msg=message):
+                            log.critical(message)
                 else:
                     log.debug('process_files: bad return from process_one_file')
         return
@@ -264,44 +341,15 @@ def setup_functions(config, log):
             'process_files': process_files,
         }
 
-
-def parse_cli(args) -> ap.Namespace:
-    p = ap.ArgumentParser(
-            description = ("Process NGinx log, compute statistics of response time by URL." +
-            "Internal cautious use only!"),
-            epilog = f'Built-in config is: "{CONFIG}"')
-    configs = p.add_mutually_exclusive_group()
-    configs.add_argument('-F', '--config-file', type=str, required=False,
-            default='/usr/local/etc/parse_nginx_log.conf',
-            dest='config_file', help="Configuration file path (optional)")
-    # removed, too cumbersome
-    # configs.add_argument('-c', '--config', required=False,
-    #        help=("Optional configuration data as a string: " +
-    #        "(LOG_DIR:... REPORT_DIR:... VERBOSE:... REPORT_SIZE:...) " +
-    #        "You can use ':' or '=', all fields are optional, fields separator is whitespace"))
-    # 
-    p.add_argument('-v', '--verbose', required=False, action='store_true',
-            help="Verbosity flag, prints debug messages")
-    p.add_argument('-L', '--log-dir', required=False, dest='log_dir',
-            help='Directory with source log files, optional')
-    p.add_argument('-R', '--report-dir', required=False, dest='report_dir',
-            help='Directory for HTML reports, optional')
-    p.add_argument('-S', '--report-size', required=False, dest='report_size',
-            help='Desired report size in lines, optional')
-    p.add_argument('-j', '--journal-to', required=False, dest='journal',
-            help="This program's log file, default to STDERR")
-    p.add_argument('--report-glob', required=False, dest='report_glob',
-            help='filename template for report, use strptime metacharacters')
-    p.add_argument('--log-glob', required=False, dest='log_glob',
-            help='filename template for log files, use strptime metacharacters')
-    p.add_argument('--allow-extension', required=False, dest='allow_exts',
-            help='Possible compressed log file extension like gz or bz2')
-    return p.parse_args(args)
-
-
 def parametrize_loggers(fmt, datefmt) -> tuple[logging.Logger,
                                                Callable[[int],None],  # logging.DEBUG etc.
                                                Callable[[str],None]]:
+    """Setting up loggers.  Parameters: 1) message format, 2) timestamp format
+    Returns: 1) logger,
+    2) function to set verbosity level, 
+    3) function to add a log file to the logger.
+    """
+    
     formatter = logging.Formatter(fmt=fmt,
                                   datefmt=datefmt)
     logger = logging.getLogger('nginx log processing')
@@ -332,14 +380,17 @@ def main() :
     # set up logging
     log, set_lvl, add_logfile = parametrize_loggers(LOG_LINE_FORMAT, LOG_DATE_FORMAT)
     try:
-        config = prgconf.config_from_cli(parse_cli(sys.argv[1:]), CONFIG)
-        log.info(f"Config is: {config}")
+        config = prgconf.configure(sys.argv[1:])
         if config is None:
             log.critical('Unreadable config, exiting')
             sys.exit(2)
         if config.verbose:
-            log.debug("Final configuration: \n" + str(config))
-            set_lvl(logging.DEBUG)
+            set_lvl(logging.INFO)
+            if config.debug:
+                log.debug("Final configuration: \n" + str(config))
+                set_lvl(logging.DEBUG)
+        else:
+            set_lvl(logging.ERROR)
         if config.journal is not None and config.journal != "":
             log.debug(f'main: config.journal is <{config.journal}>')
             add_logfile(config.journal)
@@ -351,6 +402,9 @@ def main() :
             sys.exit(1)
     except pp.ParseException:
         log.critical('Cannot parse config, this is fatal error')
+    except Exception as e:
+        log.critical("Unhandled exception caught: " + str(e))
+        sys.exit(3)
 
 if __name__ == "__main__":
     main()

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 import pyparsing as pp
 from typing import Optional
-
-# ------- Config file parsing ----------
-#     # optional comment to end of line
-#     REPORT_SIZE: 1000,
-#     REPORT_DIR: ./reports,
-#     LOG_DIR: ./log,
-#     VERBOSE: True,
-#     REPORT_GLOB : report-%Y-%m-%d.html
-#     LOG_GLOB   : nginx_log-%Y%m%d
-#     ALLOW_EXTS : gz, bz2
-#     JOURNAL: /tmp/nginx_parser.log
+# ------- Config file parsing ----------:
+# # optional comment to end of line 
+# REPORT_SIZE   : 1000,
+# REPORT_DIR    : ./reports,
+# LOG_DIR       : ./log,
+# VERBOSE       : True,
+# REPORT_GLOB   : report-%Y-%m-%d.html
+# LOG_GLOB      : nginx_log-%Y%m%d
+# ALLOW_EXTS    : gz, bz2
+# JOURNAL       : /tmp/nginx_parser.log
+# TEMPLATE_HTML : report.html
 
 var_name_separator = pp.Suppress(pp.Char(':='))
 comment_line = pp.Optional(pp.LineStart() + '#' + pp.SkipTo(pp.LineEnd()))
@@ -46,30 +46,33 @@ my_journal = pp.Optional(pp.Suppress(pp.CaselessKeyword('journal')) + var_name_s
 ext_component = pp.Word(pp.alphanums, min=1, max=4)  # .zest
 ext_keyword   = pp.CaselessKeyword('allow_extensions')
 ext_sep       = pp.Char(',. ')
-ext_list      = (pp.delimited_list(ext_component, ext_sep, allow_trailing_delim=True)).set_results_name('allowed_exts')
-allow_exts    = (pp.Optional(pp.Suppress(ext_keyword) + var_name_separator + pp.Optional(ext_list))
-                        )
+ext_list      = (pp.delimited_list(ext_component, ext_sep, allow_trailing_delim=True))
+allow_exts    = (pp.Optional(pp.Suppress(ext_keyword) + var_name_separator +
+                 pp.Optional(ext_list).set_results_name('allowed_exts')))
 # -- config variables
 report_size  = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_size')) +
-                var_name_separator + pp.Word(pp.nums).set_results_name('report_size'))
+               var_name_separator + pp.Word(pp.nums).set_results_name('report_size'))
 report_dir   = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_dir')) +  
-                var_name_separator + path.set_results_name('report_dir'))
+               var_name_separator + path.set_results_name('report_dir'))
 log_dir      = pp.Optional(pp.Suppress(pp.CaselessKeyword('log_dir')) +
-                var_name_separator + path.set_results_name('log_dir'))
+               var_name_separator + path.set_results_name('log_dir'))
 verbose_flag = pp.Optional(pp.Suppress(pp.CaselessKeyword('verbose')) +
-                var_name_separator + bool_val.set_results_name('verbose'))
+               var_name_separator + bool_val.set_results_name('verbose'))
 log_glob     = pp.Optional(pp.Suppress(pp.CaselessKeyword('log_glob')) +
-                var_name_separator + fileglob_tmpl.set_results_name('log_glob'))
+               var_name_separator + fileglob_tmpl.set_results_name('log_glob'))
 report_glob  = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_glob')) +
-                var_name_separator + fileglob_tmpl.set_results_name('report_glob'))
+               var_name_separator + fileglob_tmpl.set_results_name('report_glob'))
 log_date_format = pp.Optional(pp.Suppress(pp.CaselessKeyword('log_date_format')) + 
-                var_name_separator + time_pattern)
+               var_name_separator + time_pattern)
 report_date_format = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_date_format')) + 
-                var_name_separator + time_pattern)
+               var_name_separator + time_pattern)
+report_template = pp.Optional(pp.Suppress(pp.CaselessKeyword('template_html')) +
+               var_name_separator + path.set_results_name('template_html'))
 # -- config as a whole
 config       = pp.Each([comment_line, report_size, report_dir, log_dir,
                         verbose_flag, log_glob, report_glob, allow_exts,
-                        log_date_format, report_date_format, my_journal])
+                        log_date_format, report_date_format, my_journal,
+                        report_template])
 # ---- End of config file parsing ----
 
 def template_to_glob(tmpl :str) -> str:
@@ -103,9 +106,11 @@ def parse_config(parser_obj, config_string, log) -> Optional[dict]:
                 'report_dir' : parsed.report_dir,
                 'log_dir'    : parsed.log_dir,
                 'verbose'    : parsed.verbose,
+                'debug'      : False,
                 'report_glob': parsed.report_glob,
                 'log_glob'   : parsed.log_glob,
-                'allow_exts' : extensions_list
+                'allow_exts' : extensions_list,
+                'template_html' : parsed.template_html,
             }
         else:
             log.error(f"Trying to parse empty string <{config_string}> as a program configuration")

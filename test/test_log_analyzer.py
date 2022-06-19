@@ -8,6 +8,8 @@ import pathlib as pl
 import itertools as it
 import datetime
 import logging
+import json
+from typing import NamedTuple
 
 TEMPDIR = '/tmp'
 
@@ -41,7 +43,10 @@ class TestFilesSelection(ut.TestCase):
                            report_size=10, verbose=True,
                            log_glob='nginx-test-acc_%Y%m%d.log',
                            report_glob='report_%F.html',
-                           allow_exts=['gz'],)
+                           allow_exts=['gz'],
+                           template_html='report.html',
+                           debug=False,
+                           journal='')
         cls.funcs_table = la.setup_functions(cfg, cls.logger)
         return
 
@@ -69,6 +74,9 @@ class TestFilesSelection(ut.TestCase):
                            report_size=10, verbose=True,
                            log_glob='nginx-test-acc_%Y%m%d.log',
                            report_glob='rep_%Y-%m-%d.html',
+                           template_html='report.html',
+                           debug=False,
+                           journal='',
                            allow_exts=['gz'])
 
         fn = la.setup_functions(norep_cfg, TestFilesSelection.logger)['select_input_file']()
@@ -85,6 +93,46 @@ class TestFilesSelection(ut.TestCase):
         name = mkname('nginx-test-acc_20220102.log')
         self.assertEqual(name, pl.Path('/tmp/TestDir/report/report_2022-01-02.html'))
 
+class TestConfigure(ut.TestCase):
+    "test parsing of CLI and making the config object"
+
+    def test_verbose_debug_1(self):
+        argv = '-vvv -L /tmp -R /tmp -S 300'.split()
+        config = pconf.configure(argv)
+        self.assertNotEqual(config, None)
+        self.assertTrue(config.verbose)
+        self.assertTrue(config.debug)
+
+    def test_cfg_template(self):
+        argv = "".split()
+
+class TestOutputData(ut.TestCase):
+    """Testing of statistics computing and serialization"""
+
+#            la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 20, 33.33),
+#            la.OutputUrlStats('/2', 1, 0.0, 0.1,  0.2, 0.0, 20, 33.33),
+#            la.OutputUrlStats('/3', 1, 0.0, 0.15, 0.2, 0.0, 20, 33.33),
+
+    def test_is_instance(self):
+        orec = la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 20, 33.33)
+        self.assertTrue(isinstance(orec, la.OutputUrlStats))
+
+    def test_nt_serialize(self):
+        "test serialization of named tuple"
+        nt = la.GeneralStats(2, 423)
+        js = json.dumps(nt, default = lambda x: x.__dict__, separators=(',', ':'))
+        self.assertEqual(js, '{"total_records":2,"sum_latency":423}')
+        
+
+    def test_serialize_output_stats(self):
+        recs = [
+            la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 20, 33.33),
+            la.OutputUrlStats('/2', 1, 0.0, 0.1,  0.2, 0.0, 20, 33.33),
+            la.OutputUrlStats('/3', 1, 0.0, 0.15, 0.2, 0.0, 20, 33.33),
+            ]
+        # select only a first element, but wrap in a list
+        js = json.dumps([recs[0]], cls=la.OutputJSONEncoder, separators=(',', ':'))
+        self.assertEqual(js, '[{"url":"/1","count":2,"time_avg":0.0,"time_max":0.2,"time_sum":0.3,"time_med":0.0,"time_perc":20,"count_perc":33.33}]')
 
 if __name__ == "__main__":
     ut.main()

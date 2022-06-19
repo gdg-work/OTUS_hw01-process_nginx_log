@@ -169,6 +169,14 @@ class TestConfigFileParser(ut.TestCase):
         parsed_exts = cfp.allow_exts.parse_string('allow_extensions: bz2, xz, zst, zip')
         self.assertEqual(list(parsed_exts), ['bz2', 'xz', 'zst', 'zip'], 'Incorrect parsing of extensions list')
 
+    def test_config_report_template(self):
+        confstring = " ".join([
+            'report_size: 250 report_dir: /tmp log_dir: /var/log verbose: false report_glob=report_%F.html ',
+            'log_glob=nginx_access_%F.log template_html=./resource/report.html',])
+        t = cfp.config.run_tests(confstring, print_results=False)
+        self.assertTrue(t[0], 'Good config string doesnt parse')
+        p = cfp.config.parse_string(confstring)
+        self.assertEqual(p.template_html, "./resource/report.html")
 
     def test_config_parser(self):
         t = cfp.config.run_tests(
@@ -183,6 +191,7 @@ class TestConfigFileParser(ut.TestCase):
             log_dir: /tmp/log
             verbose: 1
             report_glob: report_%F.html
+            template_html: report.html
             log_glob: nginx_access-%Y%m%d.log
             """], comment=None, print_results=False)
         self.assertTrue(t[0], 'Good multiline config doesnt parse')
