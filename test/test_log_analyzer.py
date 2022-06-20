@@ -9,9 +9,23 @@ import itertools as it
 import datetime
 import logging
 import json
-from typing import NamedTuple
 
 TEMPDIR = '/tmp'
+
+CONFIG = """
+    REPORT_SIZE: 100
+    REPORT_DIR: /tmp/test/report/
+    LOG_DIR: /tmp/test/log/
+    VERBOSE: off
+    LOG_GLOB: nginx-access-ui.log-%Y%m%d
+    REPORT_GLOB: report-%Y.%m.%d.html
+    ALLOW_EXTENSIONS: gz
+    REPORT_TEMPLATE: report.html
+    # Next line is for optional journal file.
+    # JOURNAL:
+"""
+
+log = logging.getLogger('test-log-analyzer')
 
 class TestFilesSelection(ut.TestCase):
     "Testing selection if input/output files"
@@ -28,7 +42,7 @@ class TestFilesSelection(ut.TestCase):
         for p in (cls._dir, cls.in_dir, cls.out_dir, cls.empty_dir):
             p.mkdir()
         # create some files in the test directory
-        for fake_date in range(20210310,20210331):
+        for fake_date in range(20210310,20210329):
             fake_filename = "nginx-test-acc_{}.log".format(fake_date)
             if fake_date % 3 == 0:
                 (cls.in_dir / pl.Path(fake_filename + '.gz')).touch(mode=0o644)
@@ -66,7 +80,7 @@ class TestFilesSelection(ut.TestCase):
     def test_find_last_log(self):
         select_input_file = TestFilesSelection.funcs_table['select_input_file']
         fn = select_input_file()
-        self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_20210329.log'))
+        self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_20210328.log.gz'))
 
     def test_find_no_log(self):
         norep_cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.empty_dir),
@@ -98,8 +112,9 @@ class TestConfigure(ut.TestCase):
 
     def test_verbose_debug_1(self):
         argv = '-vvv -L /tmp -R /tmp -S 300'.split()
-        config = pconf.configure(argv)
+        config = pconf.configure(argv, log, CONFIG)
         self.assertNotEqual(config, None)
+        # we didn't have to check 'config' for value 'None' here, because of assertion
         self.assertTrue(config.verbose)
         self.assertTrue(config.debug)
 
@@ -108,10 +123,6 @@ class TestConfigure(ut.TestCase):
 
 class TestOutputData(ut.TestCase):
     """Testing of statistics computing and serialization"""
-
-#            la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 20, 33.33),
-#            la.OutputUrlStats('/2', 1, 0.0, 0.1,  0.2, 0.0, 20, 33.33),
-#            la.OutputUrlStats('/3', 1, 0.0, 0.15, 0.2, 0.0, 20, 33.33),
 
     def test_is_instance(self):
         orec = la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 20, 33.33)
@@ -126,13 +137,17 @@ class TestOutputData(ut.TestCase):
 
     def test_serialize_output_stats(self):
         recs = [
-            la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 20, 33.33),
-            la.OutputUrlStats('/2', 1, 0.0, 0.1,  0.2, 0.0, 20, 33.33),
+            la.OutputUrlStats('/1', 2, 0.0, 0.2,  0.3, 0.0, 60, 33.33),
+            la.OutputUrlStats('/2', 1, 0.0, 0.1,  0.2, 0.0, 20, 33.34),
             la.OutputUrlStats('/3', 1, 0.0, 0.15, 0.2, 0.0, 20, 33.33),
             ]
         # select only a first element, but wrap in a list
-        js = json.dumps([recs[0]], cls=la.OutputJSONEncoder, separators=(',', ':'))
-        self.assertEqual(js, '[{"url":"/1","count":2,"time_avg":0.0,"time_max":0.2,"time_sum":0.3,"time_med":0.0,"time_perc":20,"count_perc":33.33}]')
+        js = json.dumps(recs, cls=la.OutputJSONEncoder, separators=(',', ':'))
+        self.assertEqual(js, '[' + ','.join([
+            '{"url":"/1","count":2,"time_avg":0.0,"time_max":0.2,"time_sum":0.3,"time_med":0.0,"time_perc":60,"count_perc":33.33}',
+            '{"url":"/2","count":1,"time_avg":0.0,"time_max":0.1,"time_sum":0.2,"time_med":0.0,"time_perc":20,"count_perc":33.34}',
+            '{"url":"/3","count":1,"time_avg":0.0,"time_max":0.15,"time_sum":0.2,"time_med":0.0,"time_perc":20,"count_perc":33.33}',
+            ]) + ']')
 
 if __name__ == "__main__":
     ut.main()

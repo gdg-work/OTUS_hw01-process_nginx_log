@@ -6,25 +6,23 @@ import argparse as ap
 import logging
 from   typing import Optional, NamedTuple
 
-# You can modify the default configuration here
-CONFIG = """
-    REPORT_SIZE: 100
-    REPORT_DIR: /tmp/test/report/
-    LOG_DIR: /tmp/test/log/
-    VERBOSE: off
-    LOG_GLOB: nginx-access-ui.log-%Y%m%d
-    REPORT_GLOB: report-%Y.%m.%d.html
-    ALLOW_EXTENSIONS: gz
-    REPORT_TEMPLATE: report.html
-    # Next line is for optional journal file.
-    # JOURNAL:
-"""
+class ConfigObj(NamedTuple):
+    log_dir: str
+    report_dir: str
+    report_size: int
+    verbose: bool
+    debug: bool
+    log_glob: str
+    report_glob: str
+    allow_exts: list[str]
+    journal: str
+    template_html: str
 
-def parse_cli(args) -> ap.Namespace:
+def parse_cli(args, default_config) -> ap.Namespace:
     p = ap.ArgumentParser(
             description = ("Process NGinx log, compute statistics of response time by URL." +
             "Internal cautious use only!"),
-            epilog = f'Built-in config is: "{CONFIG}"')
+            epilog = f'Built-in config is: "{default_config}"')
     p.add_argument('-F', '--config-file', type=str, required=False,
             default='/usr/local/etc/parse_nginx_log.conf',
             dest='config_file', help="Configuration file path (optional)")
@@ -52,43 +50,30 @@ def parse_cli(args) -> ap.Namespace:
     p.add_argument('--template', required=False, default='', help='HTML template for the report')
     return p.parse_args(args)
 
-
-class ConfigObj(NamedTuple):
-        log_dir: str
-        report_dir: str
-        report_size: int
-        verbose: bool
-        debug: bool
-        log_glob: str
-        report_glob: str
-        allow_exts: list[str]
-        journal: str
-        template_html: str
-
-def config_from_cli(cli_params, default_cfg = CONFIG) -> Optional[ConfigObj]:
+def config_from_cli(cli_params: ap.Namespace, default_cfg: str, log: logging.Logger) -> Optional[ConfigObj]:
     "Initialize from parsed CLI parameters"
     # first, use config file or a CLI config string
-    cfg = cfp.parse_config(cfp.config, default_cfg, logging)
+    cfg = cfp.parse_config(cfp.config, default_cfg, log)
     if cfg is None:
-        logging.error('Cannot parse default (internal) config, exiting')
+        log.error('Cannot parse default (internal) config, exiting')
         return None
 
-    logging.debug("Current config: " + str(cfg))
+    log.debug("Current config: " + str(cfg))
 
     if cli_params.config_file is not None:
         cfg_file_name = cli_params.config_file
         try:
             with open(cfg_file_name, 'r') as f_cfgfile:
-                updates = cfp.parse_config(cfp.config, f_cfgfile.read(), logging)
+                updates = cfp.parse_config(cfp.config, f_cfgfile.read(), log)
                 if updates is not None:
                     cfg.update(updates)
                 else:
-                    logging.debug('Null config, using default configuration')
+                    log.debug('Null config, using default configuration')
         except OSError:
-            logging.error(f'Configuration file: <{cfg_file_name}> cannot be read')
+            log.error(f'Configuration file: <{cfg_file_name}> cannot be read')
             return None
         except pp.ParseException:
-            logging.error(f'Configuration file <{cfg_file_name}> is not parseable')
+            log.error(f'Configuration file <{cfg_file_name}> is not parseable')
             return None
 
     # overwrite params from CLI
@@ -126,8 +111,8 @@ def config_from_cli(cli_params, default_cfg = CONFIG) -> Optional[ConfigObj]:
             template_html = cfg['template_html']
         )
         
-def configure(argv, default_config=CONFIG):
-    return config_from_cli(parse_cli(argv), default_config)
+def configure(argv: list[str], log: logging.Logger, default_config :str):
+    return config_from_cli(parse_cli(argv, default_config), default_config, log)
 
 if __name__ == "__main__":
     print("This is a library, not a program")

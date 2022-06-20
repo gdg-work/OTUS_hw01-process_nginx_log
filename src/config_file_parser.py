@@ -14,13 +14,13 @@ from typing import Optional
 # TEMPLATE_HTML : report.html
 
 var_name_separator = pp.Suppress(pp.Char(':='))
-comment_line = pp.Optional(pp.LineStart() + '#' + pp.SkipTo(pp.LineEnd()))
+comment_line = pp.Optional(pp.Suppress(pp.python_style_comment))
 # path is too simplistic, needs to be replaced by OS.path, may be
 path         = pp.Word(pp.identbodychars + '.~/')
 true_val     = pp.one_of('true on 1', caseless=True).set_parse_action(pp.replace_with(True))
 false_val    = pp.one_of('false  off 0', caseless=True).set_parse_action(pp.replace_with(False))
 bool_val     = pp.Or([true_val, false_val])
-
+digits       = pp.Word(pp.nums)
 # -- time strings in filenames
 supported_time_metas = pp.Char('YmdbF')
 time_metachar = pp.Combine('%' + supported_time_metas)
@@ -51,7 +51,7 @@ allow_exts    = (pp.Optional(pp.Suppress(ext_keyword) + var_name_separator +
                  pp.Optional(ext_list).set_results_name('allowed_exts')))
 # -- config variables
 report_size  = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_size')) +
-               var_name_separator + pp.Word(pp.nums).set_results_name('report_size'))
+               var_name_separator + digits.set_results_name('report_size'))
 report_dir   = pp.Optional(pp.Suppress(pp.CaselessKeyword('report_dir')) +  
                var_name_separator + path.set_results_name('report_dir'))
 log_dir      = pp.Optional(pp.Suppress(pp.CaselessKeyword('log_dir')) +
@@ -113,7 +113,7 @@ def parse_config(parser_obj, config_string, log) -> Optional[dict]:
                 'template_html' : parsed.template_html,
             }
         else:
-            log.error(f"Trying to parse empty string <{config_string}> as a program configuration")
+            log.info(f"Trying to parse empty string <{config_string}> as a program configuration")
             return None
     except pp.ParseException:
         log.error(f"Cannot parse configuration: <{config_string}>")

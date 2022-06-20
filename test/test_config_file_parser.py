@@ -3,6 +3,7 @@
 import unittest as ut
 import config_file_parser as cfp
 import logging as log
+import pyparsing as pp
 
 class TestConfigFileParser(ut.TestCase):
 
@@ -75,7 +76,6 @@ class TestConfigFileParser(ut.TestCase):
             report_dir: '../reports/'
             ''', print_results=True)
         self.assertTrue(t[0], 'Good report_dir doesnt parse')
-
 
     def test_verbose(self):
         t1 = cfp.verbose_flag.run_tests('''
@@ -170,12 +170,16 @@ class TestConfigFileParser(ut.TestCase):
         self.assertEqual(list(parsed_exts), ['bz2', 'xz', 'zst', 'zip'], 'Incorrect parsing of extensions list')
 
     def test_config_report_template(self):
-        confstring = " ".join([
-            'report_size: 250 report_dir: /tmp log_dir: /var/log verbose: false report_glob=report_%F.html ',
-            'log_glob=nginx_access_%F.log template_html=./resource/report.html',])
-        t = cfp.config.run_tests(confstring, print_results=False)
+        confstring_nl = "\n".join([
+            'report_size: 250', 'report_dir: /tmp', 'log_dir: /var/log', 'verbose: false', 'report_glob=report_%F.html',
+            'log_glob=nginx_access_%F.log', 'template_html=./resource/report.html',])
+        confstring_spaces = " ".join([
+            'report_size: 250', 'report_dir: /tmp', 'log_dir: /var/log', 'verbose: false', 'report_glob=report_%F.html',
+            'log_glob=nginx_access_%F.log', 'template_html=./resource/report.html',])
+        t = cfp.config.run_tests(confstring_nl, print_results=False)
+        t = cfp.config.run_tests(confstring_spaces, print_results=False)
         self.assertTrue(t[0], 'Good config string doesnt parse')
-        p = cfp.config.parse_string(confstring)
+        p = cfp.config.parse_string(confstring_nl)
         self.assertEqual(p.template_html, "./resource/report.html")
 
     def test_config_parser(self):
@@ -183,6 +187,13 @@ class TestConfigFileParser(ut.TestCase):
             'report_size: 250 report_dir: /tmp log_dir: /var/log verbose: false report_glob=report_%F.html log_glob=nginx_access_%F.log',
             print_results=False)
         self.assertTrue(t[0], 'Good config doesnt parse')
+
+    def test_config_parser_comment_only(self):
+        t = cfp.config.run_tests(
+            '# Just some comment here',
+            comment=pp.Empty(),
+            print_results=True)
+        self.assertTrue(t[0], 'Comment-only config doesnt parse')
 
     def test_config_parser_multiline(self):
         t = cfp.config.run_tests(["""

@@ -22,6 +22,19 @@ from collections.abc import  MutableMapping
 from enum import Enum
 import json
 
+# You can modify the default configuration here
+CONFIG = """
+    REPORT_SIZE: 100
+    REPORT_DIR: /tmp/test/report/
+    LOG_DIR: /tmp/test/log/
+    VERBOSE: off
+    LOG_GLOB: nginx-access-ui.log-%Y%m%d
+    REPORT_GLOB: report-%Y.%m.%d.html
+    ALLOW_EXTENSIONS: gz
+    REPORT_TEMPLATE: report.html
+    # Next line is for optional journal file.
+    # JOURNAL:
+"""
 
 # Some pseudo constants for logger (see logging module documentation)
 LOG_LINE_FORMAT = r'%(asctime)s: %(levelname).1s -- %(message)s'
@@ -85,14 +98,22 @@ def compute_output_stats(url: str, url_info: UrlInfo, total_count: int,
         time_avg   = url_info.sum_latency / (url_info.occurencies * 1000),
         )
 
-def process_stats(stats: StatsResult) -> list[OutputUrlStats]:
+def select_n_longest_delayd_urls(stats: UrlDict, n: int) -> list[str]:
+    "Selects N URLs with the most sum_latency and returns them as a list"
+    threshold = 1  # milliseconds, XXX better be parametrized
+    url_tuples = [ (u, s.sum_latency) for u,s in stats.items() if s.sum_latency > threshold ]
+    url_tuples.sort(key = lambda x: x[1], reverse=True)
+    urls_selected = [u for u, _ in url_tuples][0:n]
+    return urls_selected
+
+def process_stats(stats: StatsResult, urls_count_to_select) -> list[OutputUrlStats]:
     """Computes some summary statistics about processing duration/latencies"""
     url_stats, totals = stats
     # sort URL statistics by sum duration and take first N from them
-    # url_stats.sort
-    # url.stats.take_first(config.report_size)
-    return ([ compute_output_stats(url, rec, totals.total_records, totals.sum_latency)
-               for url, rec in url_stats.items() ])
+    urls_s = select_n_longest_delayd_urls(url_stats, urls_count_to_select)
+    # url.stats.take_first(config.ort_size)
+    return ([ compute_output_stats(url, url_stats[url], totals.total_records, totals.sum_latency)
+               for url in urls_s ])
 
 class OutputJSONEncoder(json.JSONEncoder):
     """Helper class for encoding OutputUrlStats to JSON"""
@@ -170,9 +191,8 @@ def setup_functions(config, log):
             last_src_file = max(it.chain(
                                 src_dir.glob(glob_pattern),
                                 it.chain.from_iterable([
-                                    src_dir.glob(glob_pattern + ext)
-                                    for ext in config.allow_exts
-                            ])))
+                                    src_dir.glob(glob_pattern + '.' + ext)
+                                    for ext in config.allow_exts ])))
             # check destination directory for report of that date
             log.debug(f'select_input_file: Input file {last_src_file} found, processing')
             return last_src_file
@@ -204,7 +224,7 @@ def setup_functions(config, log):
             log.debug('search_for_report::destination directory does exist')
             full_report_fn = make_report_filename(input_file)
             if full_report_fn.exists() and full_report_fn.is_file() and full_report_fn.stat().st_size > 0:
-                log.debug(f'search_for_report::Found existing report file: {full_report_fn}')
+                log.info(f'search_for_report::Found existing report file: {full_report_fn}')
                 return full_report_fn
             else:
                 # the file will be created/recreated
@@ -323,14 +343,14 @@ def setup_functions(config, log):
                 stats = process_one_file(input_fn)
                 if stats is not None:
                     match write_json_to_output_file(
-                                output_to_json(process_stats(stats)),
+                                output_to_json(process_stats(stats, config.report_size)),
                                 input_fn):
                         case Ok(data=bytes_written):
                             log.info(f'Finished, {bytes_written} bytes written to output file')
                         case Err(msg=message):
                             log.critical(message)
                 else:
-                    log.debug('process_files: bad return from process_one_file')
+                    log.info('process_files: bad return from process_one_file')
         return
 
     return {
@@ -342,21 +362,19 @@ def setup_functions(config, log):
         }
 
 def parametrize_loggers(fmt, datefmt) -> tuple[logging.Logger,
-                                               Callable[[int],None],  # logging.DEBUG etc.
-                                               Callable[[str],None]]:
+                                               Callable[[int],None],  # set level logging.DEBUG etc.
+                                               Callable[[str],None],  # set log filename
+                                               ]:
     """Setting up loggers.  Parameters: 1) message format, 2) timestamp format
     Returns: 1) logger,
     2) function to set verbosity level, 
     3) function to add a log file to the logger.
     """
-    
-    formatter = logging.Formatter(fmt=fmt,
-                                  datefmt=datefmt)
-    logger = logging.getLogger('nginx log processing')
-    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+    logger = logging.getLogger('Nginx log processing')
 
     def add_console_logger():
-        # create console handler and set level to info
+        # create console handler and set level to info. Uses 'logger' object from higher level
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
         ch.setFormatter(formatter)
@@ -367,6 +385,7 @@ def parametrize_loggers(fmt, datefmt) -> tuple[logging.Logger,
         logger.setLevel(new_level)
 
     def add_file_logger(filename):
+        # adds a file to the logger
         fh = logging.FileHandler(filename)
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
@@ -380,7 +399,7 @@ def main() :
     # set up logging
     log, set_lvl, add_logfile = parametrize_loggers(LOG_LINE_FORMAT, LOG_DATE_FORMAT)
     try:
-        config = prgconf.configure(sys.argv[1:])
+        config = prgconf.configure(sys.argv[1:], log, CONFIG)
         if config is None:
             log.critical('Unreadable config, exiting')
             sys.exit(2)
@@ -402,9 +421,9 @@ def main() :
             sys.exit(1)
     except pp.ParseException:
         log.critical('Cannot parse config, this is fatal error')
-    except Exception as e:
-        log.critical("Unhandled exception caught: " + str(e))
-        sys.exit(3)
+    # except Exception as e:
+    #    log.critical("Unhandled exception caught: " + str(e))
+    #    sys.exit(3)
 
 if __name__ == "__main__":
     main()
