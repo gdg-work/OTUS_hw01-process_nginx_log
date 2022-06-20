@@ -98,6 +98,10 @@ def config_from_cli(cli_params: ap.Namespace, default_cfg: str, log: logging.Log
     if cli_params.allow_exts is not None:
         cfg['allow_exts'] = list(cfp.ext_list.parse_string(cli_params.allow_exts))
 
+    # fix 'allow_exts' list: add dots to filename extensions
+    extslist = ['.' + e.strip('.') for e in cfg['allow_exts']]
+    cfg['allow_exts'] = extslist
+
     return ConfigObj(
             log_dir     = cfg['log_dir'],
             report_dir  = cfg['report_dir'],

@@ -57,7 +57,7 @@ class TestFilesSelection(ut.TestCase):
                            report_size=10, verbose=True,
                            log_glob='nginx-test-acc_%Y%m%d.log',
                            report_glob='report_%F.html',
-                           allow_exts=['gz'],
+                           allow_exts=['.gz'],
                            template_html='report.html',
                            debug=False,
                            journal='')
@@ -91,7 +91,7 @@ class TestFilesSelection(ut.TestCase):
                            template_html='report.html',
                            debug=False,
                            journal='',
-                           allow_exts=['gz'])
+                           allow_exts=['.gz'])
 
         fn = la.setup_functions(norep_cfg, TestFilesSelection.logger)['select_input_file']()
         self.assertEqual(fn, None)

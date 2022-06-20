@@ -168,7 +168,7 @@ def setup_functions(config, log):
         time_pattern = config.log_glob
         input_path = pl.Path(input_file_name)
         # get rid of compression extensions
-        if ('.' + input_path.suffix) in config.allow_exts:
+        if input_path.suffix in config.allow_exts:
             input_short_name = input_path.stem
         else:  # no compression extension encounted
             input_short_name = input_path.name
@@ -191,7 +191,7 @@ def setup_functions(config, log):
             last_src_file = max(it.chain(
                                 src_dir.glob(glob_pattern),
                                 it.chain.from_iterable([
-                                    src_dir.glob(glob_pattern + '.' + ext)
+                                    src_dir.glob(glob_pattern + ext)  # extensions in list are with dots (.gz etc)
                                     for ext in config.allow_exts ])))
             # check destination directory for report of that date
             log.debug(f'select_input_file: Input file {last_src_file} found, processing')
