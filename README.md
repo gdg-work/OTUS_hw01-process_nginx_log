@@ -13,10 +13,17 @@
 ├── Optional         ::  optional tasks
 ├── OUT              ::  Samples of output format
 ├── README.md        ::  this file
+├── resources        ::  Additional files for program
+│   └── jquery.tablesorter.min.js    :: keep this file around  the output HTML
 ├── src              ::  Source code
-│   └── __pycache__  ::  Python cached (compiled) files
+│   ├── config_file_parser.py     :: 
+│   ├── log_analyzer.py           :: main module of the program
+│   ├── nginx_log_parser.py       :: parsing of NGinx log
+│   ├── program_config.py         :: structures and funtions for program configuration
+│   └── __pycache__               :: cached compiled modules
 ├── test             ::  Unit tests
-│   └── SConstruct   ::  File for 'scons' build tool to run tests on changed files
+│   ├── SConstruct   ::  File for 'scons' build tool to run tests on changed files
+│   └── test_<mod>   ::  Tests for module <mod>       
 └── TODO.md          ::  ToDo list
 ```
 
@@ -26,7 +33,6 @@ Priority, lowest to highest:
 
 - Internal defaults
 - Configuration file given with '-F' option
-- Configuration string in command line
 - Single options like --log-dir and --report-glob
 - Some options aren't configurable via CLI options (yet)
 
@@ -92,4 +98,4 @@ it will cause time/date parsing errors.  Use `allow_extensions` parameter.
     одному URL с разными параметрами дадут нам сто строк в итоговой таблице.
 
 2.  Есть ли смысл считать медианы, это требует большого расхода памяти и не даёт никакой интересной информации.
-    Если хочется всерьёз покопаться в этих данных — Pandas в помощь, он любую статистику посчитает и построит картинки.
+    Если хочется всерьёз покопаться в этих данных —  Pandas в помощь, он любую статистику посчитает и построит картинки.
