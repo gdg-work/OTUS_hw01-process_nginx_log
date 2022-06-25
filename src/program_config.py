@@ -63,7 +63,7 @@ def config_from_cli(cli_params: ap.Namespace, default_cfg: str, log: logging.Log
     if cli_params.config_file is not None:
         cfg_file_name = cli_params.config_file
         try:
-            with open(cfg_file_name, 'r') as f_cfgfile:
+            with open(cfg_file_name, 'r', encoding='utf-8') as f_cfgfile:
                 updates = cfp.parse_config(cfp.config, f_cfgfile.read(), log)
                 if updates is not None:
                     cfg.update(updates)
@@ -116,7 +116,12 @@ def config_from_cli(cli_params: ap.Namespace, default_cfg: str, log: logging.Log
         )
         
 def configure(argv: list[str], log: logging.Logger, default_config :str):
-    return config_from_cli(parse_cli(argv, default_config), default_config, log)
+    try:
+        result = config_from_cli(parse_cli(argv, default_config), default_config, log)
+        return result
+    except pp.ParseException:
+        log.critical('Cannot parse config, this is fatal error')
+        return None
 
 if __name__ == "__main__":
     print("This is a library, not a program")

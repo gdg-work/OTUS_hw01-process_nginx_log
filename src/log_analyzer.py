@@ -5,11 +5,10 @@
 #                     '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '
 #                     '$request_time';
 
-import argparse as ap
 import nginx_log_parser as nlp
 import config_file_parser as cfp
 import program_config as prgconf
-import pyparsing as pp
+# standard library modules
 import itertools as it
 import logging
 import sys
@@ -152,7 +151,7 @@ def setup_functions(config, log):
             return False
         if report_tmpl.exists() and report_tmpl.is_file():
             try:
-                with open(report_tmpl, "r") as f_in:
+                with open(report_tmpl, "r", encoding='utf-8') as f_in:
                     _ = f_in.read(1)  # read one byte to check the file
             except OSError:
                 log.critical(f"Cannot read a template for report from file: <{report_tmpl}>")
@@ -179,7 +178,19 @@ def setup_functions(config, log):
         except ValueError:
             log.error(f'parse_input_date::Unparseable date (format {time_pattern}, filename {input_short_name})')
             return None
-            
+    
+    def _timestamp_from_filename(fn: pl.Path) -> int:
+        """Служебная функция для сортировки имён файлов, зная шаблон даты, возвращает дату как int
+        (число дней с 1 января 1 года н.э, неотрицательно.  Для дат д.н.э. не работает).
+        Для некорректных дат возвращет 0
+        """
+        parsed_d = parse_input_date(fn)
+        if parsed_d:
+            return parsed_d.toordinal()
+        else:
+            return 0
+
+
     def select_input_file() -> Optional[pl.Path]:
         log.debug(f'select_input_file called, config.log_dir is <{config.log_dir}>, config.log_glob is <{config.log_glob}>')
         src_dir = pl.Path(config.log_dir)
@@ -192,7 +203,8 @@ def setup_functions(config, log):
                                 src_dir.glob(glob_pattern),
                                 it.chain.from_iterable([
                                     src_dir.glob(glob_pattern + ext)  # extensions in list are with dots (.gz etc)
-                                    for ext in config.allow_exts ])))
+                                    for ext in config.allow_exts ])),
+                                key = _timestamp_from_filename)
             # check destination directory for report of that date
             log.debug(f'select_input_file: Input file {last_src_file} found, processing')
             return last_src_file
@@ -419,11 +431,9 @@ def main() :
         else:
             log.critical('Invalid configuration')
             sys.exit(1)
-    except pp.ParseException:
-        log.critical('Cannot parse config, this is fatal error')
-    # except Exception as e:
-    #    log.critical("Unhandled exception caught: " + str(e))
-    #    sys.exit(3)
+    except Exception as e:
+        log.critical("Unhandled exception caught: " + str(e))
+        sys.exit(3)
 
 if __name__ == "__main__":
     main()

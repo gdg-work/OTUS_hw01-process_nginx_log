@@ -51,6 +51,30 @@ class TestFilesSelection(ut.TestCase):
                     (cls.in_dir / pl.Path(fake_filename + '.bz2')).touch(mode=0o644)
                 else:
                     (cls.in_dir / pl.Path(fake_filename)).touch(mode=0o644)
+        # create another set of files, with different date templates
+
+        fn_prefix = "nginx-test-acc_"
+        for fake_year in range(2007, 2010):
+            for fake_month in range(7,8):
+                for fake_day in range(15,19):
+                    date = datetime.date(fake_year, fake_month, fake_day)
+
+                    match date.toordinal():
+                        case n if n % 3 == 0:
+                            fn_suffix = '.log.gz'
+                        case n if n %5 == 0:
+                            fn_suffix = '.log.bz2'
+                        case n if n %7 == 0:
+                            fn_suffix = '.log.xz'
+                        case _:
+                            fn_suffix = '.log'
+
+                    fn_day_first = date.strftime(f"{fn_prefix}%d.%m.%Y{fn_suffix}")
+                    fn_mon_first = date.strftime(f"{fn_prefix}%m-%d-%y{fn_suffix}")
+                    fn_yr_first  = date.strftime(f"{fn_prefix}%F{fn_suffix}")
+                    (cls.in_dir / pl.Path(fn_day_first)).touch(mode=0o644)
+                    (cls.in_dir / pl.Path(fn_mon_first)).touch(mode=0o644)
+                    (cls.in_dir / pl.Path(fn_yr_first)).touch(mode=0o644)
 
         cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
                            report_dir=str(TestFilesSelection.out_dir),
@@ -68,9 +92,11 @@ class TestFilesSelection(ut.TestCase):
     def tearDownClass(cls):
         for fn in it.chain(cls.in_dir.glob('*'), cls.out_dir.glob('*'),
                            (f for f in cls._dir.glob('*') if not f.is_dir())):
-            fn.unlink()
+            # fn.unlink()
+            pass  # for possibility to comment/uncomment the previous line
         for dir in (cls.in_dir, cls.out_dir, cls.empty_dir, cls._dir):
-            dir.rmdir()
+            # dir.rmdir()
+            pass
 
     @ut.skip('for testing of tests')
     def test_list_logs(self):

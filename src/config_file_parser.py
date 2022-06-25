@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import pyparsing as pp
+# external library modules
+import pyparsing as pp    # https://github.com/pyparsing/pyparsing
+# standard library modules
 from typing import Optional
 # ------- Config file parsing ----------:
 # # optional comment to end of line 
