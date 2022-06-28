@@ -92,6 +92,7 @@ requestDuration = realNum.set_results_name('duration')
 logLine = ( pp.LineStart() + pp.Suppress(ipAddrV4) +  remoteUser + realIP + pp.Suppress('[') + timeStamp + pp.Suppress(']') + httpRequestData +  statusCode + bytesTransferred + refererUrl +  userAgent + forwardedFor + requestID + rbUser + requestDuration + pp.LineEnd() )
 # ---------- end of log file parsing ---------
 
+# dureation in milliseconds, ingeger
 Request = namedtuple('Request', ['ts', 'url', 'duration'])
 
 def parse_log_line(log_line: str, log: logging.Logger) -> Optional[Request]:

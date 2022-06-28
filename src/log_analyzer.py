@@ -18,10 +18,12 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Optional, Union, NamedTuple, Callable, Any
 from collections.abc import  MutableMapping
-from enum import Enum
+from array import array
+from enum import Enum, IntEnum
 import json
 
 # You can modify the default configuration here
+# it it just a text string to be parsed as a config file
 CONFIG = """
     REPORT_SIZE: 100
     REPORT_DIR: /tmp/test/report/
@@ -39,6 +41,13 @@ CONFIG = """
 LOG_LINE_FORMAT = r'%(asctime)s: %(levelname).1s -- %(message)s'
 LOG_DATE_FORMAT = r'%Y.%m.%d %H:%M:%S'
 
+# return codes
+class RetCodes(IntEnum):
+    OK = 0
+    Canceled = 1
+    InvalidConfig = 2
+    UnhandledError = 3
+
 class ReportFileState(Enum):
     NOFILE = 1
     NODIR = 2
@@ -46,10 +55,10 @@ class ReportFileState(Enum):
 class UrlInfo(NamedTuple):
     """all the URL information will be collected here. The URL itself will
        be a key in the dictionary where this tuple will be a value"""
+    durations:   array
     occurencies: int = 0
     max_latency: int = 0
     sum_latency: int = 0
-    # durations: list[int] = []
 
 @dataclass(frozen=True)
 class GeneralStats:
@@ -86,16 +95,28 @@ StatusWithData = Union[Err, Ok]
 
 def compute_output_stats(url: str, url_info: UrlInfo, total_count: int,
                          total_duration: int) -> OutputUrlStats:
+    MS_IN_S = 1000
     return OutputUrlStats(
         url        = url,
         count      = url_info.occurencies,
-        time_max   = float(url_info.max_latency) / 1000,
-        time_sum   = float(url_info.sum_latency) / 1000,
-        time_med   = 0.0,
+        time_max   = float(url_info.max_latency) / MS_IN_S,
+        time_sum   = float(url_info.sum_latency) / MS_IN_S,
+        time_med   = compute_median(url_info) / MS_IN_S,
         time_perc  = float(100*url_info.sum_latency)/float(total_duration),
         count_perc = float(100*url_info.occurencies)/float(total_count),
-        time_avg   = url_info.sum_latency / (url_info.occurencies * 1000),
+        time_avg   = url_info.sum_latency / (url_info.occurencies * MS_IN_S),
         )
+
+def compute_median(url_info: UrlInfo) -> int:
+    if url_info.occurencies > 1:
+        sorted_times = sorted(url_info.durations)
+        midele_idx = url_info.occurencies // 2
+        if url_info.occurencies %2 == 0:  # median is an average between two values in the center
+            return (sorted_times[midele_idx] + sorted_times[midele_idx - 1]) // 2
+        else:
+            return sorted_times[midele_idx]
+    else:
+        return url_info.max_latency
 
 def select_n_longest_delayd_urls(stats: UrlDict, n: int) -> list[str]:
     "Selects N URLs with the most sum_latency and returns them as a list"
@@ -157,6 +178,7 @@ def setup_functions(config, log):
                 log.critical(f"Cannot read a template for report from file: <{report_tmpl}>")
                 return False
         else:
+            log.error(f"Report template file {report_tmpl} doesn't exist or isn't a file")
             return False
         return True
 
@@ -245,21 +267,27 @@ def setup_functions(config, log):
             log.debug("search_for_report: destination directory doesn't exist")
             return ReportFileState.NODIR
 
-    def add_to_stats(url, duration, url_stats: UrlDict, gen_stats: GeneralStats):
+    def add_to_stats(url: str, duration: int, url_stats: UrlDict, gen_stats: GeneralStats):
         # trying creation of docstrings from list of strings
         " ".join(["Add current record to statistics in url_stats and gen_stats variables.",
                   "Both url_stats and gen_stats will be modified by this function"])
         if url in url_stats:
             url_state = url_stats[url]
+            dur_array = url_state.durations
+            dur_array.append(duration)
             url_stats[url] = UrlInfo(
-                url_state.occurencies + 1,
-                max(duration, url_state.max_latency),
-                url_state.sum_latency + duration,
-                # url_state.durations.append(durations),
+                durations   = dur_array,
+                occurencies = url_state.occurencies + 1,
+                max_latency = max(duration, url_state.max_latency),
+                sum_latency = url_state.sum_latency + duration,
             )
         else:
             # url_stats[url] = UrlInfo(1, duration, duration, [duration])
-            url_stats[url] = UrlInfo(1, duration, duration)
+            url_stats[url] = UrlInfo(
+                durations    = array('l',[duration]),
+                occurencies  = 1, 
+                max_latency  = duration, 
+                sum_latency  = duration )
         gen_stats = GeneralStats(total_records = gen_stats.total_records +1, sum_latency= gen_stats.sum_latency + duration)
         return url_stats, gen_stats
 
@@ -328,7 +356,7 @@ def setup_functions(config, log):
             else:
                 try:
                     with open(output_fn, 'w', encoding='utf8') as out_f:
-                        bytes_written = out_f.write(make_report(json_data))
+                        bytes_written = out_f.write(report_html)
                         return Ok(data = bytes_written)
                 except OSError:
                     log.critical(f"Error writing to output file <{output_fn}>, disk full?")
@@ -376,45 +404,52 @@ def setup_functions(config, log):
 def parametrize_loggers(fmt, datefmt) -> tuple[logging.Logger,
                                                Callable[[int],None],  # set level logging.DEBUG etc.
                                                Callable[[str],None],  # set log filename
+                                               Callable[[int],None],  # set console logging level
                                                ]:
     """Setting up loggers.  Parameters: 1) message format, 2) timestamp format
     Returns: 1) logger,
-    2) function to set verbosity level, 
+    2) function to set general verbosity level
     3) function to add a log file to the logger.
+    4) function to set verbosity level on console
     """
     formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
     logger = logging.getLogger('Nginx log processing')
+    ch = logging.StreamHandler()
 
     def add_console_logger():
         # create console handler and set level to info. Uses 'logger' object from higher level
-        ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
         return
 
-    def setlevel(new_level):
+    def setlevel(new_level: int):  # use logger.SOMETHING for new level
         logger.setLevel(new_level)
 
     def add_file_logger(filename):
         # adds a file to the logger
         fh = logging.FileHandler(filename)
         fh.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)  # decrease loggin level of the console
         fh.setFormatter(formatter)
         logger.addHandler(fh)
         return
 
+    def set_console_level(new_level: int):
+        ch.setLevel(new_level)
+        return
+
     add_console_logger()
-    return (logger, setlevel, add_file_logger)
+    return (logger, setlevel, add_file_logger, set_console_level)
 
 def main() :
     # set up logging
-    log, set_lvl, add_logfile = parametrize_loggers(LOG_LINE_FORMAT, LOG_DATE_FORMAT)
+    log, set_lvl, add_logfile, _ = parametrize_loggers(LOG_LINE_FORMAT, LOG_DATE_FORMAT)
     try:
         config = prgconf.configure(sys.argv[1:], log, CONFIG)
         if config is None:
             log.critical('Unreadable config, exiting')
-            sys.exit(2)
+            sys.exit(RetCodes.InvalidConfig)
         if config.verbose:
             set_lvl(logging.INFO)
             if config.debug:
@@ -423,17 +458,20 @@ def main() :
         else:
             set_lvl(logging.ERROR)
         if config.journal is not None and config.journal != "":
-            log.debug(f'main: config.journal is <{config.journal}>')
+            log.info(f'main: writing journal to <{config.journal}>')
             add_logfile(config.journal)
         funs = setup_functions(config, log)
         if funs['check_config']():
             funs['process_files']()
         else:
             log.critical('Invalid configuration')
-            sys.exit(1)
-    except Exception as e:
-        log.critical("Unhandled exception caught: " + str(e))
-        sys.exit(3)
+            sys.exit(RetCodes.InvalidConfig)
+    except KeyboardInterrupt:
+        log.info('Interrupted by user')
+        sys.exit(RetCodes.Canceled)
+    except Exception:
+        log.exception("Unhandled exception caught!")
+        sys.exit(RetCodes.UnhandledError)
 
 if __name__ == "__main__":
     main()

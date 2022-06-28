@@ -24,7 +24,7 @@ false_val    = pp.one_of('false  off 0', caseless=True).set_parse_action(pp.repl
 bool_val     = pp.Or([true_val, false_val])
 digits       = pp.Word(pp.nums)
 # -- time strings in filenames
-supported_time_metas = pp.Char('YmdbF')
+supported_time_metas = pp.Char('YymdbF')
 time_metachar = pp.Combine('%' + supported_time_metas)
 time_other = pp.Optional(pp.Word(pp.alphanums + '-;_!@#$^&*([{}]),.<>/?`'))
 time_pattern = pp.Combine(time_metachar +
@@ -79,12 +79,13 @@ config       = pp.Each([comment_line, report_size, report_dir, log_dir,
 
 def template_to_glob(tmpl :str) -> str:
     """converts filename template with strptime metacharacters to
-       shell globbing pattern.  Not all metacharacters are supported yet, only %[YmdbF]
+       shell globbing pattern.  Not all metacharacters are supported yet, only %[YymdbF]
        Years are limited by pattern 20xx, where x is [0-9]
     """
     metachar_table = {
         '%F': '20[0-9][0-9]-[01][0-9]-[0-3][0-9]',
         '%Y': '20[0-9][0-9]',
+        '%y': '[0-9][0-9]',
         '%m': '[01][0-9]',
         '%d': '[0-3][0-9]',
         '%b': '[A-Z][a-z][a-z]',

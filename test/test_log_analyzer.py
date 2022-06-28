@@ -9,9 +9,12 @@ import itertools as it
 import datetime
 import logging
 import json
+from array import array
 
 TEMPDIR = '/tmp'
 
+# Just a string, it will be parsed by config_parser module.
+# Format: key: value, you can use : or = as a separator
 CONFIG = """
     REPORT_SIZE: 100
     REPORT_DIR: /tmp/test/report/
@@ -60,17 +63,17 @@ class TestFilesSelection(ut.TestCase):
                     date = datetime.date(fake_year, fake_month, fake_day)
 
                     match date.toordinal():
-                        case n if n % 3 == 0:
+                        case int(n) if n % 3 == 0:
                             fn_suffix = '.log.gz'
-                        case n if n %5 == 0:
+                        case int(n) if n %5 == 0:
                             fn_suffix = '.log.bz2'
-                        case n if n %7 == 0:
+                        case int(n) if n %7 == 0:
                             fn_suffix = '.log.xz'
                         case _:
                             fn_suffix = '.log'
 
                     fn_day_first = date.strftime(f"{fn_prefix}%d.%m.%Y{fn_suffix}")
-                    fn_mon_first = date.strftime(f"{fn_prefix}%m-%d-%y{fn_suffix}")
+                    fn_mon_first = date.strftime(f"{fn_prefix}%m-%d-%Y{fn_suffix}")
                     fn_yr_first  = date.strftime(f"{fn_prefix}%F{fn_suffix}")
                     (cls.in_dir / pl.Path(fn_day_first)).touch(mode=0o644)
                     (cls.in_dir / pl.Path(fn_mon_first)).touch(mode=0o644)
@@ -92,16 +95,16 @@ class TestFilesSelection(ut.TestCase):
     def tearDownClass(cls):
         for fn in it.chain(cls.in_dir.glob('*'), cls.out_dir.glob('*'),
                            (f for f in cls._dir.glob('*') if not f.is_dir())):
-            # fn.unlink()
+            fn.unlink()
             pass  # for possibility to comment/uncomment the previous line
         for dir in (cls.in_dir, cls.out_dir, cls.empty_dir, cls._dir):
-            # dir.rmdir()
+            dir.rmdir()
             pass
 
     @ut.skip('for testing of tests')
     def test_list_logs(self):
         print("\n", "\n".join([str(f) for f in TestFilesSelection.in_dir.glob('*')]))
-        self.assertTrue(True)
+        return
 
     def test_find_last_log(self):
         select_input_file = TestFilesSelection.funcs_table['select_input_file']
@@ -121,6 +124,32 @@ class TestFilesSelection(ut.TestCase):
 
         fn = la.setup_functions(norep_cfg, TestFilesSelection.logger)['select_input_file']()
         self.assertEqual(fn, None)
+
+    def test_find_log_time_format_dayfirst(self):
+        rep_cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
+                           report_dir=str(TestFilesSelection.out_dir),
+                           report_size=10, verbose=True,
+                           log_glob='nginx-test-acc_%d.%m.%Y.log',
+                           report_glob='rep_%Y-%m-%d.html',
+                           template_html='report.html',
+                           debug=False,
+                           journal='',
+                           allow_exts=['.gz'])
+        fn = la.setup_functions(rep_cfg, TestFilesSelection.logger)['select_input_file']()
+        self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_18.07.2009.log'))
+
+    def test_find_log_time_format_monthfirst(self):
+        rep_cfg = pconf.ConfigObj(log_dir=str(TestFilesSelection.in_dir),
+                           report_dir=str(TestFilesSelection.out_dir),
+                           report_size=10, verbose=True,
+                           log_glob='nginx-test-acc_%m-%d-%Y.log',
+                           report_glob='rep_%Y-%m-%d.html',
+                           template_html='report.html',
+                           debug=False,
+                           journal='',
+                           allow_exts=['.gz'])
+        fn = la.setup_functions(rep_cfg, TestFilesSelection.logger)['select_input_file']()
+        self.assertEqual(fn, pl.Path('/tmp/TestDir/log/nginx-test-acc_07-18-2009.log'))
 
     def test_parse_input_date(self):
         in_fn = "/tmp/TestDir/log/nginx-test-acc_20210329.log"
@@ -174,6 +203,41 @@ class TestOutputData(ut.TestCase):
             '{"url":"/2","count":1,"time_avg":0.0,"time_max":0.1,"time_sum":0.2,"time_med":0.0,"time_perc":20,"count_perc":33.34}',
             '{"url":"/3","count":1,"time_avg":0.0,"time_max":0.15,"time_sum":0.2,"time_med":0.0,"time_perc":20,"count_perc":33.33}',
             ]) + ']')
+
+class TestMedian(ut.TestCase):
+    "testing of median computing function"
+
+    def test_median_empty_array(self):
+        ui = la.UrlInfo(array('l',[]), occurencies=0, max_latency=0, sum_latency=0)
+        m = la.compute_median(ui)
+        self.assertEqual(m, 0)
+
+    def test_median_one_value(self):
+        ui = la.UrlInfo(array('l',[13]), occurencies=1, max_latency=13, sum_latency=13)
+        m = la.compute_median(ui)
+        self.assertEqual(m, 13)
+
+    def test_median_two_values(self):
+        ui = la.UrlInfo(array('l',[13, 17]), occurencies=2, max_latency=17, sum_latency=30)
+        m = la.compute_median(ui)
+        self.assertEqual(m, 15)
+
+    def test_median_three_values(self):
+        ui = la.UrlInfo(array('l',[13, 15, 17]), occurencies=3, max_latency=17, sum_latency=45)
+        m = la.compute_median(ui)
+        self.assertEqual(m, 15)
+
+    def test_median_constant_value(self):
+        ui = la.UrlInfo(array('l',[13] * 5), occurencies=5, max_latency=13, sum_latency=13*5)
+        m = la.compute_median(ui)
+        self.assertEqual(m, 13)
+
+    def test_median_reverse_sorted(self):
+        vals = list(range(10,20))
+        ui = la.UrlInfo(array('l',reversed(vals)), occurencies=10,
+                        max_latency=19, sum_latency=sum(range(10,20)))
+        m = la.compute_median(ui)
+        self.assertEqual(m, 14)
 
 if __name__ == "__main__":
     ut.main()

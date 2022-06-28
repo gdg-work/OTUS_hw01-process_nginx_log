@@ -112,6 +112,10 @@ class TestConfigFileParser(ut.TestCase):
                 nginx_log-%F
                 nginx-%F_log.log
                 nginx-access_%Y%m%d.log
+                nginx-test-acc_%Y-%m-%d.log.gz
+                nginx-test-acc_%m-%d-%Y.log.gz
+                nginx-test-acc_%m-%d-%y.log.gz
+                nginx-test-acc_%d.%m.%Y.log.gz
                 ''', print_results=False)
         self.assertTrue(lp[0], 'Good log pattern doesnt pass')
 
